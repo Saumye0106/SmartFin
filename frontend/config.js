@@ -5,9 +5,8 @@ const CONFIG = {
     // For local development
     LOCAL_BACKEND: 'http://localhost:5000',
 
-    // For deployment - you'll need to deploy backend separately
-    // Options: Railway, Render, PythonAnywhere, Heroku
-    PRODUCTION_BACKEND: 'https://your-backend-url.com',
+    // For deployment - Render backend
+    PRODUCTION_BACKEND: 'https://smartfin-8hyb.onrender.com',
 
     // Auto-detect environment
     isLocal: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1',
