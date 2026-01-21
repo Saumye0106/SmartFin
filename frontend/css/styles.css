@@ -266,6 +266,18 @@ body {
     margin-bottom: 1.5rem;
 }
 
+.overview-grid .card {
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Chart container - fixed size to prevent expansion */
+#spendingChart {
+    max-width: 100% !important;
+    max-height: 250px !important;
+    height: 250px !important;
+}
+
 /* Ratios */
 .ratios-container {
     display: flex;
