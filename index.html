@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartFin - Financial Health Dashboard</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="config.js"></script>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="container">
+            <h1 class="logo">💰 SmartFin</h1>
+            <p class="tagline">Your Financial Health Companion</p>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="container main-container">
+
+        <!-- Input Section -->
+        <section class="card input-section">
+            <h2 class="section-title">Enter Your Financial Details</h2>
+
+            <form id="financialForm" class="form-grid">
+                <div class="form-group">
+                    <label for="income">Monthly Income (Rs.)</label>
+                    <input type="number" id="income" placeholder="50000" required min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="rent">Rent/Housing (Rs.)</label>
+                    <input type="number" id="rent" placeholder="15000" required min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="food">Food & Groceries (Rs.)</label>
+                    <input type="number" id="food" placeholder="8000" required min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="travel">Travel & Transport (Rs.)</label>
+                    <input type="number" id="travel" placeholder="3000" required min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="shopping">Shopping & Entertainment (Rs.)</label>
+                    <input type="number" id="shopping" placeholder="5000" required min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="emi">EMI & Loans (Rs.)</label>
+                    <input type="number" id="emi" placeholder="10000" required min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="savings">Savings (Rs.)</label>
+                    <input type="number" id="savings" placeholder="9000" required min="0">
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Analyze My Finances</button>
+                    <button type="button" class="btn btn-secondary" id="loadSampleBtn">Load Sample Data</button>
+                </div>
+            </form>
+        </section>
+
+        <!-- Loading Indicator -->
+        <div id="loadingIndicator" class="loading-indicator hidden">
+            <div class="spinner"></div>
+            <p>Analyzing your financial health...</p>
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsSection" class="results-section hidden">
+
+            <!-- Score Card -->
+            <section class="card score-card">
+                <div class="score-header">
+                    <h2>Your Financial Health Score</h2>
+                </div>
+                <div class="score-display">
+                    <div class="score-circle">
+                        <svg width="200" height="200" viewBox="0 0 200 200">
+                            <circle cx="100" cy="100" r="90" fill="none" stroke="#e5e7eb" stroke-width="20"/>
+                            <circle id="scoreCircle" cx="100" cy="100" r="90" fill="none" stroke-width="20"
+                                    stroke-dasharray="565.48" stroke-dashoffset="565.48"
+                                    transform="rotate(-90 100 100)" stroke-linecap="round"/>
+                        </svg>
+                        <div class="score-text">
+                            <span id="scoreValue" class="score-number">0</span>
+                            <span class="score-max">/100</span>
+                        </div>
+                    </div>
+                    <div class="score-info">
+                        <div id="categoryBadge" class="category-badge">Calculating...</div>
+                        <p id="categoryDescription" class="category-description"></p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Financial Overview Grid -->
+            <div class="overview-grid">
+
+                <!-- Spending Breakdown -->
+                <section class="card">
+                    <h3 class="card-title">Spending Breakdown</h3>
+                    <canvas id="spendingChart" height="250"></canvas>
+                </section>
+
+                <!-- Key Ratios -->
+                <section class="card">
+                    <h3 class="card-title">Key Financial Ratios</h3>
+                    <div class="ratios-container">
+                        <div class="ratio-item">
+                            <div class="ratio-label">Expense Ratio</div>
+                            <div class="ratio-bar">
+                                <div id="expenseBar" class="ratio-fill" style="width: 0%"></div>
+                            </div>
+                            <div id="expenseValue" class="ratio-value">0%</div>
+                        </div>
+                        <div class="ratio-item">
+                            <div class="ratio-label">Savings Ratio</div>
+                            <div class="ratio-bar">
+                                <div id="savingsBar" class="ratio-fill savings" style="width: 0%"></div>
+                            </div>
+                            <div id="savingsValue" class="ratio-value">0%</div>
+                        </div>
+                        <div class="ratio-item">
+                            <div class="ratio-label">EMI Burden</div>
+                            <div class="ratio-bar">
+                                <div id="emiBar" class="ratio-fill emi" style="width: 0%"></div>
+                            </div>
+                            <div id="emiValue" class="ratio-value">0%</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- Anomalies & Warnings -->
+            <section id="anomaliesSection" class="card anomalies-section hidden">
+                <h3 class="card-title">⚠️ Alerts & Warnings</h3>
+                <div id="anomaliesList" class="anomalies-list"></div>
+            </section>
+
+            <!-- Guidance Panel -->
+            <section class="card guidance-section">
+                <h3 class="card-title">💡 Personalized Guidance</h3>
+
+                <div id="strengthsSection" class="guidance-group hidden">
+                    <h4 class="guidance-subtitle">✓ Your Strengths</h4>
+                    <ul id="strengthsList" class="guidance-list strengths"></ul>
+                </div>
+
+                <div id="warningsSection" class="guidance-group hidden">
+                    <h4 class="guidance-subtitle">⚠ Areas of Concern</h4>
+                    <ul id="warningsList" class="guidance-list warnings"></ul>
+                </div>
+
+                <div id="recommendationsSection" class="guidance-group hidden">
+                    <h4 class="guidance-subtitle">→ Recommendations</h4>
+                    <ul id="recommendationsList" class="guidance-list recommendations"></ul>
+                </div>
+            </section>
+
+            <!-- Investment Advice -->
+            <section class="card investment-section">
+                <h3 class="card-title">📈 Investment Suggestions</h3>
+                <div id="investmentEligibility" class="investment-eligibility"></div>
+                <div id="investmentAdvice" class="investment-advice"></div>
+                <div id="investmentList" class="investment-list"></div>
+            </section>
+
+            <!-- What-If Simulator -->
+            <section class="card whatif-section">
+                <h3 class="card-title">🔮 What-If Simulator</h3>
+                <p class="whatif-description">Experiment with changes to see how they affect your score</p>
+
+                <div class="whatif-controls">
+                    <div class="whatif-input-group">
+                        <label>Adjust Shopping:</label>
+                        <input type="number" id="whatifShopping" class="whatif-input">
+                    </div>
+                    <div class="whatif-input-group">
+                        <label>Adjust Savings:</label>
+                        <input type="number" id="whatifSavings" class="whatif-input">
+                    </div>
+                    <button id="runSimulationBtn" class="btn btn-accent">Run Simulation</button>
+                </div>
+
+                <div id="simulationResults" class="simulation-results hidden">
+                    <div class="simulation-comparison">
+                        <div class="simulation-item">
+                            <div class="simulation-label">Current Score</div>
+                            <div id="currentSimScore" class="simulation-score">0</div>
+                        </div>
+                        <div class="simulation-arrow">→</div>
+                        <div class="simulation-item">
+                            <div class="simulation-label">New Score</div>
+                            <div id="newSimScore" class="simulation-score">0</div>
+                        </div>
+                        <div class="simulation-item">
+                            <div class="simulation-label">Change</div>
+                            <div id="scoreChange" class="simulation-change">0</div>
+                        </div>
+                    </div>
+                    <div id="simulationImpact" class="simulation-impact"></div>
+                </div>
+            </section>
+
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 SmartFin - ML-Based Financial Health Platform</p>
+            <p class="footer-note">Powered by Machine Learning | Model Accuracy: 92%</p>
+        </div>
+    </footer>
+
+    <script src="js/api.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
