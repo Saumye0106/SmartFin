@@ -89,11 +89,16 @@ function hideLoading() {
 
 // Display results
 function displayResults(result) {
+    // Reset scroll position first
+    window.scrollTo({ top: 0, behavior: 'instant' });
+
     // Show results section
     document.getElementById('resultsSection').classList.remove('hidden');
 
-    // Scroll to results
-    document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth' });
+    // Scroll to results after a brief delay
+    setTimeout(() => {
+        document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
 
     // Display score
     displayScore(result.score, result.classification);
