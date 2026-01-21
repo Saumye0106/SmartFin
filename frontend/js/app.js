@@ -109,10 +109,13 @@ function displayResults(result) {
         canvasParent.removeChild(canvasParent.firstChild);
     }
 
-    // Create fresh canvas
+    // Create fresh canvas with explicit dimensions
     const newCanvas = document.createElement('canvas');
     newCanvas.id = 'spendingChart';
+    newCanvas.width = 400;
     newCanvas.height = 250;
+    newCanvas.style.width = '100%';
+    newCanvas.style.height = '250px';
     canvasParent.appendChild(newCanvas);
 
     // Force a reflow to ensure the reset happens
