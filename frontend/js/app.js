@@ -94,6 +94,11 @@ function displayResults(result) {
     // Hide results section first to reset layout
     resultsSection.classList.add('hidden');
 
+    // Reset canvas explicitly
+    const canvas = document.getElementById('spendingChart');
+    canvas.removeAttribute('style');
+    canvas.width = canvas.width; // Force canvas reset
+
     // Force a reflow to ensure the reset happens
     void resultsSection.offsetHeight;
 
@@ -103,9 +108,11 @@ function displayResults(result) {
     // Display score
     displayScore(result.score, result.classification);
 
-    // Display patterns
-    Charts.createSpendingChart(result.patterns);
-    Charts.animateRatios(result.patterns);
+    // Display patterns - add small delay to ensure DOM is ready
+    setTimeout(() => {
+        Charts.createSpendingChart(result.patterns);
+        Charts.animateRatios(result.patterns);
+    }, 50);
 
     // Display anomalies
     displayAnomalies(result.anomalies);
