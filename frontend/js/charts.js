@@ -6,15 +6,11 @@ const Charts = {
     createSpendingChart(patterns) {
         const canvas = document.getElementById('spendingChart');
 
-        // Destroy existing chart if any
+        // Destroy existing chart if any (canvas will be new, so this ensures cleanup)
         if (spendingChart) {
             spendingChart.destroy();
-            spendingChart = null;
         }
-
-        // Clear canvas
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        spendingChart = null;
 
         const breakdown = patterns.breakdown;
 

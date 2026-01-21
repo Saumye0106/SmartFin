@@ -94,10 +94,14 @@ function displayResults(result) {
     // Hide results section first to reset layout
     resultsSection.classList.add('hidden');
 
-    // Reset canvas explicitly
-    const canvas = document.getElementById('spendingChart');
-    canvas.removeAttribute('style');
-    canvas.width = canvas.width; // Force canvas reset
+    // Completely replace the canvas element to remove all Chart.js artifacts
+    const oldCanvas = document.getElementById('spendingChart');
+    const canvasParent = oldCanvas.parentElement;
+    const newCanvas = document.createElement('canvas');
+    newCanvas.id = 'spendingChart';
+    newCanvas.height = 250;
+    canvasParent.removeChild(oldCanvas);
+    canvasParent.appendChild(newCanvas);
 
     // Force a reflow to ensure the reset happens
     void resultsSection.offsetHeight;
