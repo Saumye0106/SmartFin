@@ -94,13 +94,25 @@ function displayResults(result) {
     // Hide results section first to reset layout
     resultsSection.classList.add('hidden');
 
+    // Destroy existing chart first
+    if (window.spendingChart) {
+        window.spendingChart.destroy();
+        window.spendingChart = null;
+    }
+
     // Completely replace the canvas element to remove all Chart.js artifacts
     const oldCanvas = document.getElementById('spendingChart');
     const canvasParent = oldCanvas.parentElement;
+
+    // Remove all child nodes from parent (including Chart.js wrapper divs)
+    while (canvasParent.firstChild) {
+        canvasParent.removeChild(canvasParent.firstChild);
+    }
+
+    // Create fresh canvas
     const newCanvas = document.createElement('canvas');
     newCanvas.id = 'spendingChart';
     newCanvas.height = 250;
-    canvasParent.removeChild(oldCanvas);
     canvasParent.appendChild(newCanvas);
 
     // Force a reflow to ensure the reset happens

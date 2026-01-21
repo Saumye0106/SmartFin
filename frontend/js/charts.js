@@ -1,20 +1,17 @@
 // Charts Module using Chart.js
-let spendingChart = null;
+window.spendingChart = null;
 
 const Charts = {
     // Create spending breakdown pie chart
     createSpendingChart(patterns) {
         const canvas = document.getElementById('spendingChart');
 
-        // Destroy existing chart if any (canvas will be new, so this ensures cleanup)
-        if (spendingChart) {
-            spendingChart.destroy();
-        }
-        spendingChart = null;
+        // Reset reference (destruction happens in app.js before canvas replacement)
+        window.spendingChart = null;
 
         const breakdown = patterns.breakdown;
 
-        spendingChart = new Chart(canvas, {
+        window.spendingChart = new Chart(canvas, {
             type: 'doughnut',
             data: {
                 labels: ['Rent', 'Food', 'Travel', 'Shopping', 'EMI', 'Savings'],
