@@ -4,16 +4,21 @@ let spendingChart = null;
 const Charts = {
     // Create spending breakdown pie chart
     createSpendingChart(patterns) {
-        const ctx = document.getElementById('spendingChart');
+        const canvas = document.getElementById('spendingChart');
 
         // Destroy existing chart if any
         if (spendingChart) {
             spendingChart.destroy();
+            spendingChart = null;
         }
+
+        // Clear canvas
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         const breakdown = patterns.breakdown;
 
-        spendingChart = new Chart(ctx, {
+        spendingChart = new Chart(canvas, {
             type: 'doughnut',
             data: {
                 labels: ['Rent', 'Food', 'Travel', 'Shopping', 'EMI', 'Savings'],
@@ -70,6 +75,11 @@ const Charts = {
         const expenseRatio = (patterns.expense_ratio * 100).toFixed(1);
         const savingsRatio = (patterns.savings_ratio * 100).toFixed(1);
         const emiRatio = (patterns.emi_ratio * 100).toFixed(1);
+
+        // Reset bars first
+        document.getElementById('expenseBar').style.width = '0%';
+        document.getElementById('savingsBar').style.width = '0%';
+        document.getElementById('emiBar').style.width = '0%';
 
         // Expense bar
         setTimeout(() => {

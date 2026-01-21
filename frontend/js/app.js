@@ -89,16 +89,16 @@ function hideLoading() {
 
 // Display results
 function displayResults(result) {
-    // Reset scroll position first
-    window.scrollTo({ top: 0, behavior: 'instant' });
+    const resultsSection = document.getElementById('resultsSection');
+
+    // Hide results section first to reset layout
+    resultsSection.classList.add('hidden');
+
+    // Force a reflow to ensure the reset happens
+    void resultsSection.offsetHeight;
 
     // Show results section
-    document.getElementById('resultsSection').classList.remove('hidden');
-
-    // Scroll to results after a brief delay
-    setTimeout(() => {
-        document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 100);
+    resultsSection.classList.remove('hidden');
 
     // Display score
     displayScore(result.score, result.classification);
