@@ -1,0 +1,43 @@
+name: Auth Service CI
+
+on:
+  push:
+    paths:
+      - 'services/auth/**'
+  pull_request:
+    paths:
+      - 'services/auth/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: '${{ github.workspace }}'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Ensure AUTH_JWT_SECRET
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.AUTH_JWT_SECRET }}" ]; then
+            echo "AUTH_JWT_SECRET=${{ secrets.AUTH_JWT_SECRET }}" >> $GITHUB_ENV
+          else
+            SECRET=$(python -c "import secrets; print(secrets.token_hex(32))")
+            echo "AUTH_JWT_SECRET=$SECRET" >> $GITHUB_ENV
+          fi
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/auth/requirements.txt
+
+      - name: Run tests
+        run: |
+          python -m pytest services/auth -q

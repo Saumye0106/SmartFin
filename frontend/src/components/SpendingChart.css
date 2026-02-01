@@ -1,0 +1,55 @@
+.spending-chart-container {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.custom-tooltip {
+  background: white;
+  padding: 0.75rem 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.tooltip-label {
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 0.25rem;
+}
+
+.tooltip-value {
+  font-size: 1.125rem;
+  color: #3b82f6;
+  font-weight: 700;
+  margin: 0;
+}
+
+.spending-summary {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid #e2e8f0;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 0;
+  font-size: 1rem;
+}
+
+.summary-row span {
+  color: #64748b;
+}
+
+.summary-row strong {
+  color: #1e293b;
+  font-size: 1.125rem;
+}
+
+.savings-text {
+  color: #10b981 !important;
+}

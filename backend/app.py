@@ -9,15 +9,20 @@ import joblib
 import numpy as np
 import pandas as pd
 from datetime import datetime
+import os
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend integration
 
 # ==================== LOAD ML MODEL ====================
 print("Loading ML model...")
-model = joblib.load('../ml/financial_health_model.pkl')
-feature_names = joblib.load('../ml/feature_names.pkl')
-model_metadata = joblib.load('../ml/model_metadata.pkl')
+# Get the absolute path to the ml directory
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ML_DIR = os.path.join(BASE_DIR, 'ml')
+
+model = joblib.load(os.path.join(ML_DIR, 'financial_health_model.pkl'))
+feature_names = joblib.load(os.path.join(ML_DIR, 'feature_names.pkl'))
+model_metadata = joblib.load(os.path.join(ML_DIR, 'model_metadata.pkl'))
 print(f"Model loaded: {model_metadata['model_type']}")
 print(f"Model R2 Score: {model_metadata['test_r2']:.4f}")
 
