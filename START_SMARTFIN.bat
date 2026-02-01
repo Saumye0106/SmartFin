@@ -9,8 +9,8 @@ start "SmartFin Backend" cmd /k "cd backend && python app.py"
 
 timeout /t 3 /nobreak >nul
 
-echo Starting Frontend on port 8000...
-start "SmartFin Frontend" cmd /k "cd frontend && python start_frontend.py"
+echo Starting React Frontend on port 5173...
+start "SmartFin Frontend" cmd /k "cd frontend && npm run dev"
 
 timeout /t 2 /nobreak >nul
 
@@ -20,11 +20,11 @@ echo SmartFin is starting!
 echo ===================================
 echo.
 echo Backend: http://localhost:5000
-echo Frontend: http://localhost:8000
+echo Frontend: http://localhost:5173
 echo.
 echo Opening browser...
-timeout /t 2 /nobreak >nul
-start http://localhost:8000
+timeout /t 3 /nobreak >nul
+start http://localhost:5173
 echo.
 echo Press any key to stop all servers...
 pause >nul

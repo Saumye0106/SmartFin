@@ -1,0 +1,74 @@
+.guidance-panel-container {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.guidance-grid {
+  display: grid;
+  gap: 2rem;
+}
+
+.guidance-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.guidance-heading {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.strengths-heading {
+  color: #10b981;
+}
+
+.warnings-heading {
+  color: #ef4444;
+}
+
+.recommendations-heading {
+  color: #3b82f6;
+}
+
+.guidance-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.guidance-item {
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  border-left: 4px solid;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.strengths-item {
+  background: #d1fae5;
+  border-color: #10b981;
+  color: #065f46;
+}
+
+.warnings-item {
+  background: #fee2e2;
+  border-color: #ef4444;
+  color: #991b1b;
+}
+
+.recommendations-item {
+  background: #dbeafe;
+  border-color: #3b82f6;
+  color: #1e3a8a;
+}
+
+@media (min-width: 768px) {
+  .guidance-grid {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+}
