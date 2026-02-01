@@ -12,7 +12,7 @@ from datetime import datetime
 import os
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend integration
+CORS(app, origins=["https://saumye0106.github.io", "http://localhost:5173"])  # Enable CORS for GitHub Pages and local dev
 
 # ==================== LOAD ML MODEL ====================
 print("Loading ML model...")
