@@ -39,8 +39,8 @@ jobs:
       - name: Build frontend
         working-directory: ./frontend
         env:
-          VITE_API_BASE_URL: ${{ secrets.RENDER_BACKEND_URL }}
-          VITE_AUTH_BASE_URL: ${{ secrets.RENDER_BACKEND_URL }}
+          VITE_API_BASE_URL: https://smartfin-8hyb.onrender.com
+          VITE_AUTH_BASE_URL: https://smartfin-8hyb.onrender.com
         run: |
           npm run build
 
