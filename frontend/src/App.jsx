@@ -55,7 +55,11 @@ function App() {
     const token = authResponse?.token;
     if (token) {
       api.setAuthToken(token);
-      setUser({ id: authResponse.id, email: authResponse.email });
+      const userData = authResponse?.user || {};
+      setUser({ 
+        id: userData.id, 
+        email: userData.username || userData.email 
+      });
     }
   };
 

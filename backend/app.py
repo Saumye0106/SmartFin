@@ -578,8 +578,23 @@ def register():
             (username, password_hash, datetime.utcnow().isoformat())
         )
         db.commit()
+        
+        # Get the new user's ID
+        user_id = cur.lastrowid
 
-        return jsonify({'message': 'User registered successfully'}), 201
+        # Auto-login: Create tokens
+        access_token = create_access_token(identity=user_id)
+        refresh_token = create_refresh_token(identity=user_id)
+
+        return jsonify({
+            'message': 'User registered successfully',
+            'token': access_token,
+            'refresh_token': refresh_token,
+            'user': {
+                'id': user_id,
+                'username': username
+            }
+        }), 201
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
