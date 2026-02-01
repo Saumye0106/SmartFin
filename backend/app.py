@@ -290,78 +290,79 @@ def suggest_investments(score, data, patterns):
     if score >= 70 and savings_ratio >= 0.15 and emi_ratio < 0.3:
         suggestions.append({
             'type': 'Equity Mutual Funds',
-            'risk': 'Medium to High',
-            'recommended_amount': f"Rs.{int(monthly_savings * 0.4):,}",
-            'reason': 'Good financial health allows for growth-oriented investments.',
+            'risk_level': 'Medium to High',
+            'allocation': int(monthly_savings * 0.4),
+            'description': 'Good financial health allows for growth-oriented investments.',
             'suitable': True
         })
         suggestions.append({
             'type': 'Public Provident Fund (PPF)',
-            'risk': 'Low',
-            'recommended_amount': f"Rs.{int(monthly_savings * 0.3):,}",
-            'reason': 'Tax-saving with guaranteed returns.',
+            'risk_level': 'Low',
+            'allocation': int(monthly_savings * 0.3),
+            'description': 'Tax-saving with guaranteed returns.',
             'suitable': True
         })
         suggestions.append({
             'type': 'Fixed Deposits',
-            'risk': 'Low',
-            'recommended_amount': f"Rs.{int(monthly_savings * 0.3):,}",
-            'reason': 'Safe option for emergency fund.',
+            'risk_level': 'Low',
+            'allocation': int(monthly_savings * 0.3),
+            'description': 'Safe option for emergency fund.',
             'suitable': True
         })
 
     elif score >= 50 and savings_ratio >= 0.1:
         suggestions.append({
             'type': 'Hybrid Mutual Funds',
-            'risk': 'Medium',
-            'recommended_amount': f"Rs.{int(monthly_savings * 0.5):,}",
-            'reason': 'Balanced approach for moderate risk appetite.',
+            'risk_level': 'Medium',
+            'allocation': int(monthly_savings * 0.5),
+            'description': 'Balanced approach for moderate risk appetite.',
             'suitable': True
         })
         suggestions.append({
             'type': 'Recurring Deposits',
-            'risk': 'Very Low',
-            'recommended_amount': f"Rs.{int(monthly_savings * 0.5):,}",
-            'reason': 'Build disciplined savings habit.',
+            'risk_level': 'Very Low',
+            'allocation': int(monthly_savings * 0.5),
+            'description': 'Build disciplined savings habit.',
             'suitable': True
         })
 
     elif score >= 35:
         suggestions.append({
             'type': 'Emergency Fund (Savings Account)',
-            'risk': 'None',
-            'recommended_amount': f"Rs.{monthly_savings:,}",
-            'reason': 'Build emergency fund first before investing.',
+            'risk_level': 'None',
+            'allocation': monthly_savings,
+            'description': 'Build emergency fund first before investing.',
             'suitable': True
         })
         suggestions.append({
             'type': 'Equity Investments',
-            'risk': 'High',
-            'recommended_amount': 'Not Recommended',
-            'reason': 'Focus on stabilizing finances before risky investments.',
+            'risk_level': 'High',
+            'allocation': 0,
+            'description': 'Focus on stabilizing finances before risky investments. Not recommended at this time.',
             'suitable': False
         })
 
     else:  # score < 35
         suggestions.append({
             'type': 'Focus on Debt Reduction',
-            'risk': 'N/A',
-            'recommended_amount': 'All available funds',
-            'reason': 'Clear debts and stabilize finances before investing.',
+            'risk_level': 'N/A',
+            'allocation': monthly_savings,
+            'description': 'Clear debts and stabilize finances before investing.',
             'suitable': True
         })
         suggestions.append({
             'type': 'Any Investments',
-            'risk': 'N/A',
-            'recommended_amount': 'Not Recommended',
-            'reason': 'Investment not advisable until financial health improves.',
+            'risk_level': 'N/A',
+            'allocation': 0,
+            'description': 'Investment not advisable until financial health improves.',
             'suitable': False
         })
 
     return {
-        'eligible_for_investment': score >= 50 and savings_ratio >= 0.1,
+        'eligible': score >= 50 and savings_ratio >= 0.1,
         'suggestions': suggestions,
-        'overall_advice': get_investment_advice(score)
+        'message': get_investment_advice(score),
+        'advice': get_investment_advice(score)
     }
 
 
