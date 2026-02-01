@@ -52,3 +52,16 @@ nul
 # Environment variables
 .env
 .env.local
+
+# Local SQLite DBs for services
+services/**/auth.db
+**/auth.db
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# IDE run/debug databases
+.idea/
+.vscode/

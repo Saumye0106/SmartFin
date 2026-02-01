@@ -1,0 +1,32 @@
+name: Auth Service CI
+
+on:
+  push:
+    paths:
+      - 'services/auth/**'
+  pull_request:
+    paths:
+      - 'services/auth/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r services/auth/requirements.txt
+
+      - name: Run tests
+        run: |
+          pytest services/auth -q

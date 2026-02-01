@@ -114,6 +114,58 @@ git push heroku main
 
 ---
 
+## 🔐 Setting Environment Variables / Secrets
+
+You must never store secrets (like the JWT signing key) in source control. Set `AUTH_JWT_SECRET` and other env vars in your hosting provider or CI secrets.
+
+Examples:
+
+- Railway: In your project, go to **Settings → Variables**, add `AUTH_JWT_SECRET` and any other variables. Railway exposes them to your service at runtime.
+
+- Render: In the service dashboard, go to **Environment → Environment Variables**, add `AUTH_JWT_SECRET` (Key) and paste the secret value. Save and redeploy.
+
+- Heroku (CLI):
+
+```bash
+heroku config:set AUTH_JWT_SECRET="$(openssl rand -base64 48)"
+```
+
+- GitHub Actions / Workflows: use repository secrets (recommended for Actions workflows).
+    1. Go to GitHub repo → Settings → Secrets → Actions → New repository secret.
+    2. Add `AUTH_JWT_SECRET` with your secret value.
+ 3. In workflow, reference it as `${{ secrets.AUTH_JWT_SECRET }}`.
+
+- Local development (PowerShell):
+
+```powershell
+$Env:AUTH_JWT_SECRET = 'your-local-dev-secret-32chars'
+python services/auth/app.py
+```
+
+- Local development (bash):
+
+```bash
+export AUTH_JWT_SECRET='your-local-dev-secret-32chars'
+python services/auth/app.py
+```
+
+- Docker (run):
+
+```bash
+docker run -e AUTH_JWT_SECRET=$(openssl rand -base64 48) -p 6000:6000 myauthimage
+```
+
+Recommended secret generation (Linux/macOS):
+
+```bash
+openssl rand -base64 48
+```
+
+Use at least 32 bytes of random entropy for `AUTH_JWT_SECRET` (48 base64 chars is a good choice). Store secrets in your platform's secret manager.
+
+
+---
+
 ## 📝 Quick Deploy Steps
 
 ### For GitHub + Railway:
