@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 
 from flask import Flask, request, jsonify, g
@@ -49,7 +49,7 @@ def generate_token(user_id, expires_minutes=30):
     payload = {
         # subject must be a string per JWT recommendations
         'sub': str(user_id),
-        'exp': datetime.utcnow() + timedelta(minutes=expires_minutes)
+        'exp': datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
     }
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
     # PyJWT may return bytes in some versions; ensure string
@@ -88,7 +88,7 @@ def register():
         return jsonify({'message': 'email and password required'}), 400
 
     password_hash = generate_password_hash(password)
-    created_at = datetime.utcnow().isoformat()
+    created_at = datetime.now(timezone.utc).isoformat()
     db = get_db()
     cur = db.cursor()
     try:

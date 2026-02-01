@@ -10,7 +10,8 @@ def setup_module(module):
     # create a temporary DB file and set environment before importing the app
     tmp = tempfile.NamedTemporaryFile(delete=False)
     os.environ['AUTH_DB'] = tmp.name
-    os.environ['AUTH_JWT_SECRET'] = 'test-secret'
+    # use a sufficiently long secret in tests to avoid InsecureKeyLengthWarning
+    os.environ['AUTH_JWT_SECRET'] = 'a' * 64
     # import the app after env is set
     global auth_app
     auth_app = importlib.import_module('services.auth.app')
