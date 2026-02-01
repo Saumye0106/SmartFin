@@ -44,7 +44,8 @@ const api = {
       return response.data;
     } catch (error) {
       console.error('Auth register error:', error);
-      throw new Error(error?.response?.data?.message || 'Registration failed');
+      const errorMsg = error?.response?.data?.error || error?.response?.data?.message || 'Registration failed';
+      throw new Error(errorMsg);
     }
   },
 
@@ -58,7 +59,8 @@ const api = {
       return response.data;
     } catch (error) {
       console.error('Auth login error:', error);
-      throw new Error(error?.response?.data?.message || 'Login failed');
+      const errorMsg = error?.response?.data?.error || error?.response?.data?.message || 'Login failed';
+      throw new Error(errorMsg);
     }
   },
 

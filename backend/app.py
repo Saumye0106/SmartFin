@@ -554,13 +554,16 @@ def register():
     """Register a new user"""
     try:
         data = request.get_json()
+        print(f"Register request data: {data}")  # Debug logging
         username = data.get('email')  # Frontend sends 'email' field
         password = data.get('password')
 
         if not username or not password:
+            print(f"Missing fields - username: {username}, password: {password}")  # Debug
             return jsonify({'error': 'Username and password required'}), 400
 
         if len(password) < 6:
+            print(f"Password too short: {len(password)} chars")  # Debug
             return jsonify({'error': 'Password must be at least 6 characters'}), 400
 
         db = get_db()
