@@ -3,16 +3,58 @@ SmartFin - Flask Backend
 Main application file for financial health scoring and guidance
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, g
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager, create_access_token, create_refresh_token, jwt_required, get_jwt_identity
+from werkzeug.security import generate_password_hash, check_password_hash
 import joblib
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
+import sqlite3
 
 app = Flask(__name__)
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'smartfin-secret-key-change-in-production')
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
+app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
+jwt = JWTManager(app)
+
 CORS(app, origins=["https://saumye0106.github.io", "http://localhost:5173"])  # Enable CORS for GitHub Pages and local dev
+
+# Database setup
+DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth.db')
+
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(DB_PATH)
+        db.row_factory = sqlite3.Row
+    return db
+
+@app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
+
+def init_db():
+    """Initialize the database with required tables"""
+    db = sqlite3.connect(DB_PATH)
+    cur = db.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    ''')
+    db.commit()
+    db.close()
+
+# Initialize database
+init_db()
 
 # ==================== LOAD ML MODEL ====================
 print("Loading ML model...")
@@ -502,6 +544,99 @@ def model_info():
         },
         'training_samples': model_metadata['n_samples']
     })
+
+
+# ==================== AUTH ENDPOINTS ====================
+
+@app.route('/register', methods=['POST'])
+def register():
+    """Register a new user"""
+    try:
+        data = request.get_json()
+        username = data.get('email')  # Frontend sends 'email' field
+        password = data.get('password')
+
+        if not username or not password:
+            return jsonify({'error': 'Username and password required'}), 400
+
+        if len(password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+
+        db = get_db()
+        cur = db.cursor()
+
+        # Check if user exists
+        cur.execute('SELECT id FROM users WHERE username = ?', (username,))
+        if cur.fetchone():
+            return jsonify({'error': 'User already exists'}), 409
+
+        # Create user
+        password_hash = generate_password_hash(password)
+        cur.execute(
+            'INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)',
+            (username, password_hash, datetime.utcnow().isoformat())
+        )
+        db.commit()
+
+        return jsonify({'message': 'User registered successfully'}), 201
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/login', methods=['POST'])
+def login():
+    """Login user and return JWT tokens"""
+    try:
+        data = request.get_json()
+        username = data.get('email')  # Frontend sends 'email' field
+        password = data.get('password')
+
+        if not username or not password:
+            return jsonify({'error': 'Username and password required'}), 400
+
+        db = get_db()
+        cur = db.cursor()
+
+        # Get user
+        cur.execute('SELECT id, username, password_hash FROM users WHERE username = ?', (username,))
+        user = cur.fetchone()
+
+        if not user or not check_password_hash(user['password_hash'], password):
+            return jsonify({'error': 'Invalid credentials'}), 401
+
+        # Create tokens
+        access_token = create_access_token(identity=user['id'])
+        refresh_token = create_refresh_token(identity=user['id'])
+
+        return jsonify({
+            'token': access_token,
+            'refresh_token': refresh_token,
+            'user': {
+                'id': user['id'],
+                'username': user['username']
+            }
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/protected', methods=['GET'])
+@jwt_required()
+def protected():
+    """Protected endpoint - requires valid JWT"""
+    current_user_id = get_jwt_identity()
+    return jsonify({'message': 'Access granted', 'user_id': current_user_id}), 200
+
+
+@app.route('/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def refresh():
+    """Refresh access token"""
+    current_user_id = get_jwt_identity()
+    new_access_token = create_access_token(identity=current_user_id)
+    return jsonify({'token': new_access_token}), 200
 
 
 # ==================== RUN SERVER ====================
