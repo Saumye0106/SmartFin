@@ -49,6 +49,11 @@ nul
 *.tmp
 *.bak
 
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
 # Environment variables
 .env
 .env.local

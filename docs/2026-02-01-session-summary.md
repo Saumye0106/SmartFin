@@ -71,3 +71,20 @@ If you want, I can also create follow-up GitHub issues for (a) adding ML artifac
 
 ---
 End of session summary for 2026-02-01.
+
+---
+
+Post-session actions (conclusion):
+- Updated `requirements.txt` and `backend/requirements.txt` to align runtime dependencies with the trained model (scikit-learn 1.8.0), added `pyarrow` to address pandas warnings.
+- Fixed frontend build issues for GitHub Pages (`vite.config.js` base path and relative assets) and updated CI to use Node 20.20.0.
+- Configured frontend to use Render backend (`VITE_API_BASE_URL`) and verified both deployments: GitHub Pages and Render are live.
+- Added authentication endpoints into the main backend and integrated JWT-based auth; documented that the current SQLite `auth.db` is ephemeral on Render and recommended Postgres for production.
+- Fixed investment recommendations response to match frontend expectations and committed patches.
+- Created `docs/PROJECT_PLAN.md` and `docs/MICROSERVICES.md` with a migration roadmap, and added actionable todos for production migration (DB, S3 model storage, Redis, secrets manager, containerization, CI/CD, monitoring).
+
+Next steps (recommended):
+- Redeploy Render (if not already) and verify end-to-end auth and prediction flows in production.
+- Migrate authentication DB to a managed Postgres instance or add persistent storage on Render.
+- Begin microservices migration (start with `auth` and `inference` services) and scaffold Docker + `docker-compose` for local dev.
+
+Session concluded: February 1, 2026.
