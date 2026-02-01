@@ -9,12 +9,14 @@ import GuidancePanel from './components/GuidancePanel';
 import InvestmentAdvice from './components/InvestmentAdvice';
 import WhatIfSimulator from './components/WhatIfSimulator';
 import api from './services/api';
+import AuthForm from './components/AuthForm';
 
 function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [currentData, setCurrentData] = useState(null);
   const [error, setError] = useState(null);
+  const [user, setUser] = useState(null);
 
   const handleAnalyze = async (financialData) => {
     setLoading(true);
@@ -42,6 +44,20 @@ function App() {
     }
   };
 
+  const handleAuth = (authResponse) => {
+    // authResponse expected to contain token and user id/email
+    const token = authResponse?.token;
+    if (token) {
+      api.setAuthToken(token);
+      setUser({ id: authResponse.id, email: authResponse.email });
+    }
+  };
+
+  const handleLogout = () => {
+    api.setAuthToken(null);
+    setUser(null);
+  };
+
   return (
     <div className="app">
       <header className="app-header">
@@ -59,7 +75,18 @@ function App() {
             </div>
           )}
 
-          <FinancialForm onSubmit={handleAnalyze} loading={loading} />
+          {!user ? (
+            <AuthForm onAuth={handleAuth} />
+          ) : (
+            <>
+              <div style={{display: 'flex', justifyContent: 'flex-end', gap: 8}}>
+                <div>{user.email}</div>
+                <button onClick={handleLogout}>Log out</button>
+              </div>
+
+              <FinancialForm onSubmit={handleAnalyze} loading={loading} />
+            </>
+          )}
 
           {loading && (
             <div className="loading-container">
