@@ -30,6 +30,8 @@ print(f"   Columns: {list(df.columns)}")
 # ==================== 2. PREPARE DATA ====================
 print("\n[2] Preparing Data...")
 
+import argparse
+import os
 # Features (X) and Target (y)
 X = df[['income', 'rent', 'food', 'travel', 'shopping', 'emi', 'savings']]
 y = df['score']
@@ -47,7 +49,13 @@ print(f"   Testing set: {X_test.shape[0]} samples")
 
 # ==================== 3. TRAIN MULTIPLE MODELS ====================
 print("\n[3] Training Models...")
+parser = argparse.ArgumentParser(description='Train SmartFin financial health model')
+parser.add_argument('--data', default='data/smartfin_dataset.csv', help='Path to dataset CSV')
+parser.add_argument('--output-dir', default='ml', help='Directory to write model artifacts')
+args = parser.parse_args()
 
+print("\n[1] Loading Dataset...")
+df = pd.read_csv(args.data)
 models = {
     'Linear Regression': LinearRegression(),
     'Random Forest': RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10),
@@ -164,12 +172,15 @@ print(f"   Metadata saved as: model_metadata.pkl")
 
 # ==================== 8. VISUALIZE RESULTS ====================
 print("\n[8] Generating Visualizations...")
+os.makedirs(args.output_dir, exist_ok=True)
+model_filename = os.path.join(args.output_dir, 'financial_health_model.pkl')
 
 # Create figure with subplots
 fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 fig.suptitle('SmartFin - Model Performance Analysis', fontsize=16, fontweight='bold')
 
-# Plot 1: Actual vs Predicted
+joblib.dump(feature_names, os.path.join(args.output_dir, 'feature_names.pkl'))
+print(f"   Feature names saved as: {os.path.join(args.output_dir, 'feature_names.pkl')}")
 axes[0, 0].scatter(y_test, y_pred, alpha=0.5)
 axes[0, 0].plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
 axes[0, 0].set_xlabel('Actual Score')
@@ -181,7 +192,8 @@ axes[0, 0].grid(True, alpha=0.3)
 residuals = y_test - y_pred
 axes[0, 1].scatter(y_pred, residuals, alpha=0.5)
 axes[0, 1].axhline(y=0, color='r', linestyle='--', lw=2)
-axes[0, 1].set_xlabel('Predicted Score')
+joblib.dump(metadata, os.path.join(args.output_dir, 'model_metadata.pkl'))
+print(f"   Metadata saved as: {os.path.join(args.output_dir, 'model_metadata.pkl')}")
 axes[0, 1].set_ylabel('Residuals')
 axes[0, 1].set_title('Residual Plot')
 axes[0, 1].grid(True, alpha=0.3)
@@ -236,7 +248,8 @@ if hasattr(best_model, 'feature_importances_'):
     print(f"\nMost Important Feature: {top_feature['feature']} ({top_feature['importance']:.3f})")
 
 print("\nFiles Generated:")
-print("  - financial_health_model.pkl (trained model)")
+plt.savefig(os.path.join(args.output_dir, 'model_performance.png'), dpi=150, bbox_inches='tight')
+print(f"   Visualization saved as: {os.path.join(args.output_dir, 'model_performance.png')}")
 print("  - feature_names.pkl (feature list)")
 print("  - model_metadata.pkl (performance metrics)")
 print("  - model_performance.png (visualizations)")
