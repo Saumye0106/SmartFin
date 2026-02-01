@@ -34,6 +34,17 @@ def init_db():
              created_at TEXT NOT NULL
         )'''
     )
+    # refresh tokens table
+    cur.execute(
+        '''CREATE TABLE IF NOT EXISTS refresh_tokens (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             user_id INTEGER NOT NULL,
+             token TEXT NOT NULL,
+             issued_at TEXT NOT NULL,
+             revoked INTEGER DEFAULT 0,
+             FOREIGN KEY(user_id) REFERENCES users(id)
+        )'''
+    )
     db.commit()
     db.close()
 
@@ -56,6 +67,37 @@ def generate_token(user_id, expires_minutes=30):
     if isinstance(token, bytes):
         token = token.decode('utf-8')
     return token
+
+
+def generate_refresh_token(user_id):
+    import secrets
+    token = secrets.token_urlsafe(64)
+    issued_at = datetime.now(timezone.utc).isoformat()
+    db = sqlite3.connect(DB_PATH)
+    cur = db.cursor()
+    cur.execute('INSERT INTO refresh_tokens (user_id, token, issued_at) VALUES (?, ?, ?)',
+                (user_id, token, issued_at))
+    db.commit()
+    db.close()
+    return token
+
+
+def revoke_refresh_token(token):
+    db = sqlite3.connect(DB_PATH)
+    cur = db.cursor()
+    cur.execute('UPDATE refresh_tokens SET revoked = 1 WHERE token = ?', (token,))
+    db.commit()
+    db.close()
+
+
+def find_valid_refresh_token(token):
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    cur = db.cursor()
+    cur.execute('SELECT * FROM refresh_tokens WHERE token = ? AND revoked = 0', (token,))
+    row = cur.fetchone()
+    db.close()
+    return row
 
 
 def token_required(f):
@@ -121,14 +163,44 @@ def login():
     if not check_password_hash(row['password_hash'], password):
         return jsonify({'message': 'invalid credentials'}), 401
 
-    token = generate_token(user_id)
-    return jsonify({'id': user_id, 'email': email, 'token': token})
+    access_token = generate_token(user_id)
+    refresh_token = generate_refresh_token(user_id)
+    return jsonify({'id': user_id, 'email': email, 'token': access_token, 'refresh_token': refresh_token})
 
 
 @app.route('/protected', methods=['GET'])
 @token_required
 def protected():
     return jsonify({'message': 'access granted', 'user_id': request.user_id})
+
+
+@app.route('/refresh', methods=['POST'])
+def refresh():
+    data = request.get_json() or {}
+    token = data.get('refresh_token')
+    if not token:
+        return jsonify({'message': 'refresh_token required'}), 400
+
+    row = find_valid_refresh_token(token)
+    if not row:
+        return jsonify({'message': 'invalid refresh token'}), 401
+
+    user_id = row['user_id']
+    # rotate: revoke old and issue new
+    revoke_refresh_token(token)
+    new_refresh = generate_refresh_token(user_id)
+    access_token = generate_token(user_id)
+    return jsonify({'token': access_token, 'refresh_token': new_refresh})
+
+
+@app.route('/logout', methods=['POST'])
+def logout():
+    data = request.get_json() or {}
+    token = data.get('refresh_token')
+    if not token:
+        return jsonify({'message': 'refresh_token required'}), 400
+    revoke_refresh_token(token)
+    return jsonify({'message': 'logged out'})
 
 
 if __name__ == '__main__':

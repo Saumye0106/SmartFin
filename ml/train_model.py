@@ -23,7 +23,7 @@ print("=" * 70)
 
 # ==================== 1. LOAD DATASET ====================
 print("\n[1] Loading Dataset...")
-df = pd.read_csv('../data/smartfin_dataset.csv')
+df = pd.read_csv('data/smartfin_dataset.csv')
 print(f"   Loaded {len(df)} rows, {len(df.columns)} columns")
 print(f"   Columns: {list(df.columns)}")
 

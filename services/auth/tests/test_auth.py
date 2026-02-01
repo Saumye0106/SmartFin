@@ -35,15 +35,34 @@ def test_register_and_login():
     data = r.get_json()
     assert 'token' in data
 
-    # login
+    # login (should return access + refresh)
     r2 = client.post('/login', json={'email': 'a@b.com', 'password': 'pass'})
     assert r2.status_code == 200
     data2 = r2.get_json()
-    assert 'token' in data2
+    assert 'token' in data2 and 'refresh_token' in data2
 
     token = data2['token']
+    refresh = data2['refresh_token']
 
-    # protected endpoint
+    # protected endpoint with access token
     r3 = client.get('/protected', headers={'Authorization': f'Bearer {token}'})
     assert r3.status_code == 200
     assert r3.get_json().get('user_id') is not None
+
+    # use refresh to rotate and get a new access token
+    r4 = client.post('/refresh', json={'refresh_token': refresh})
+    assert r4.status_code == 200
+    data4 = r4.get_json()
+    assert 'token' in data4 and 'refresh_token' in data4
+
+    # old refresh token should be invalid now
+    r5 = client.post('/refresh', json={'refresh_token': refresh})
+    assert r5.status_code == 401
+
+    # logout with the new refresh token
+    r6 = client.post('/logout', json={'refresh_token': data4['refresh_token']})
+    assert r6.status_code == 200
+
+    # refreshing after logout should fail
+    r7 = client.post('/refresh', json={'refresh_token': data4['refresh_token']})
+    assert r7.status_code == 401

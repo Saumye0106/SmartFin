@@ -15,9 +15,10 @@ print("=" * 70)
 
 # Load model
 print("\n[1] Loading Model...")
-model = joblib.load('../ml/financial_health_model.pkl')
-feature_names = joblib.load('../ml/feature_names.pkl')
-metadata = joblib.load('../ml/model_metadata.pkl')
+# Use workspace-relative paths (tests may be run from repo root)
+model = joblib.load('ml/financial_health_model.pkl')
+feature_names = joblib.load('ml/feature_names.pkl')
+metadata = joblib.load('ml/model_metadata.pkl')
 
 print(f"   Model Type: {metadata['model_type']}")
 print(f"   R2 Score: {metadata['test_r2']:.4f}")
