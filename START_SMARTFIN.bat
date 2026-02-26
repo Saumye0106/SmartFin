@@ -5,7 +5,7 @@ echo ===================================
 echo.
 
 echo Starting Backend on port 5000...
-start "SmartFin Backend" cmd /k "cd backend && python app.py"
+start "SmartFin Backend" cmd /k "cd backend && ..\\.venv\\Scripts\\python.exe app.py"
 
 timeout /t 3 /nobreak >nul
 

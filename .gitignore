@@ -70,3 +70,22 @@ env/
 # IDE run/debug databases
 .idea/
 .vscode/
+
+aurabuildtemp/
+
+.windsurfrules
+
+# Hypothesis test framework cache
+.hypothesis/
+backend/.hypothesis/
+
+# Kiro IDE cache
+.kiro/
+
+# Superdesign cache
+.superdesign/
+
+# Pytest cache
+.pytest_cache/
+.cursor
+

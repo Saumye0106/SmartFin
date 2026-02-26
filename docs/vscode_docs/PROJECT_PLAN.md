@@ -193,98 +193,229 @@ User Input (React)
 
 ---
 
-### ⏳ Phase 5: Advanced Features (Planned)
-**Timeline:** February 16 - March 15, 2026  
-**Status:** Backlog
+### ⏳ Phase 5: SmartFin 2.0 - Complete Overhaul (Planned)
+**Timeline:** February 16 - April 15, 2026 (8 weeks)  
+**Status:** Planning Phase  
+**Documentation:** [SmartFin 2.0 Enhancement Plan](../kiro_docs/11_smartfin_2.0_enhancement_plan.md)
 
-**Planned Features:**
+**Overview:**
+SmartFin 2.0 represents a complete transformation from a basic scoring tool into a comprehensive financial intelligence platform. This phase addresses all current limitations and introduces advanced features for significantly improved user value.
 
-#### High Priority (Must Have)
-1. **User Profile Management** *(Backlog ID: 2)*
-   - View and edit profile
-   - Financial goals tracking
-   - Preference settings
+**Key Objectives:**
+- Improve ML model accuracy from 47% to 70%+ R²
+- Implement multi-dimensional financial analysis
+- Create intelligent, personalized recommendations
+- Build advanced interactive visualizations
+- Enhance overall user experience
+- Prepare foundation for AI guidance engine
+
+---
+
+#### Phase 5.1: Foundation Features (Weeks 1-3)
+**Goal:** Build essential infrastructure for advanced features
+
+1. **User Profile Management** *(Week 1 - 3 days)*
+   - Personal information management
+   - Financial goals setting
+   - Risk tolerance assessment
+   - Notification preferences
    - **Effort:** 3 days
    - **Dependencies:** Auth system ✅
+   - **Priority:** High
 
-2. **Historical Tracking** *(New)*
-   - Save financial snapshots over time
-   - Trend visualization
+2. **Historical Data Tracking** *(Week 1-2 - 5 days)*
+   - Save financial snapshots monthly
+   - Trend visualization over time
    - Progress tracking dashboard
+   - Month-over-month comparison
    - **Effort:** 5 days
-   - **Dependencies:** Database schema update
+   - **Dependencies:** User Profile ✅
+   - **Priority:** High
 
-3. **Data Export** *(New)*
-   - Export financial reports (PDF/CSV)
-   - Share insights
+3. **Data Export** *(Week 2 - 2 days)*
+   - PDF report generation
+   - CSV data export
+   - Shareable insights
+   - Email reports
    - **Effort:** 2 days
+   - **Dependencies:** Historical Tracking ✅
+   - **Priority:** Medium
 
-#### Medium Priority (Should Have)
-4. **Finance News Feed** *(Backlog ID: 13)*
-   - Integrate news API (NewsAPI or similar)
-   - Filter by category
-   - Personalized recommendations
-   - **Effort:** 3 days
-   - **Risk:** API rate limits, content quality
-
-5. **Budget Planner** *(New)*
-   - Set monthly budgets by category
-   - Track spending vs budget
-   - Budget alerts
+4. **Budget Planner** *(Week 2-3 - 4 days)*
+   - Category-wise budget setting
+   - Real-time budget tracking
+   - Overspending alerts
+   - Budget vs actual comparison
    - **Effort:** 4 days
+   - **Dependencies:** Historical Tracking ✅
+   - **Priority:** High
 
-6. **Goal Setting** *(New)*
-   - Define savings goals
-   - Track progress
-   - Milestone celebrations
-   - **Effort:** 3 days
+---
 
-#### Low Priority (Could Have)
-7. **Mini Finance Game** *(Backlog ID: 15)*
-   - Interactive learning game
-   - Financial concept demonstrations
-   - Gamification elements
+#### Phase 5.2: Core Feature Overhaul (Weeks 3-6)
+**Goal:** Transform basic scoring into comprehensive financial intelligence
+
+5. **Enhanced ML Model & Backend** *(Week 3-4 - 7 days)*
+   - Upgrade to Gradient Boosting/Random Forest
+   - Target: 70%+ R² (from 47%)
+   - Add 20+ input features
+   - Implement risk scoring system
+   - Add predictive analytics (3/6/12 month forecasts)
+   - Multi-dimensional scoring (debt, savings, spending, income, emergency)
    - **Effort:** 7 days
-   - **Risk:** Scope creep
+   - **Dependencies:** Historical data for training
+   - **Priority:** Critical
 
-8. **Social Features** *(New)*
-   - Anonymous community insights
-   - Compare with peers (anonymized)
-   - Financial tips sharing
-   - **Effort:** 5 days
-   - **Risk:** Privacy concerns, moderation
-
-9. **Advanced Analytics** *(New)*
-   - Spending heatmaps
-   - Predictive analytics (future trends)
-   - Benchmarking
+6. **Advanced Analysis Engine** *(Week 4 - 4 days)*
+   - Pattern recognition and insights
+   - Anomaly detection
+   - Behavioral analysis
+   - Smart categorization (15+ categories)
+   - Cash flow analysis
    - **Effort:** 4 days
+   - **Dependencies:** Enhanced ML Model ✅
+   - **Priority:** High
+
+7. **Smart Recommendations Engine** *(Week 4-5 - 3 days)*
+   - Personalized action plans
+   - Priority-ranked recommendations
+   - Impact estimation for each action
+   - Contextual recommendations (age, income, life stage)
+   - Smart alerts and notifications
+   - **Effort:** 3 days
+   - **Dependencies:** Advanced Analysis ✅
+   - **Priority:** Critical
+
+8. **Advanced Visualizations** *(Week 5 - 4 days)*
+   - Financial health timeline
+   - Interactive spending breakdown (drill-down)
+   - Cash flow waterfall chart
+   - Risk heatmap
+   - Goal progress indicators
+   - Benchmark comparison charts
+   - Spending heatmap calendar
+   - **Effort:** 4 days
+   - **Dependencies:** Enhanced Analysis ✅
+   - **Priority:** High
+
+9. **Enhanced User Experience** *(Week 5-6 - 3 days)*
+   - Onboarding flow wizard
+   - Modular dashboard redesign
+   - Interactive tutorials
+   - Smart notification center
+   - Mobile optimization
+   - **Effort:** 3 days
+   - **Dependencies:** All previous features
+   - **Priority:** High
+
+---
+
+#### Phase 5.3: Testing & Refinement (Week 6)
+**Goal:** Ensure quality and stability
+
+10. **Integration Testing** *(Week 6 - 3 days)*
+    - End-to-end testing
+    - Performance testing
+    - Security audit
+    - Bug fixes
+    - **Effort:** 3 days
+    - **Priority:** Critical
+
+11. **User Acceptance Testing** *(Week 6 - 2 days)*
+    - Beta user testing
+    - Feedback collection
+    - Final adjustments
+    - Documentation updates
+    - **Effort:** 2 days
+    - **Priority:** High
+
+---
+
+### ⏳ Phase 6: AI Guidance Engine (Weeks 7-10)
+**Timeline:** April 16 - May 15, 2026 (4 weeks)  
+**Status:** Future Planning  
+**Documentation:** To be created
+
+**Overview:**
+The AI Guidance Engine will be the second main feature of SmartFin, providing conversational AI-powered financial advice. This will transform SmartFin from an analysis tool into an interactive financial companion.
+
+**Planned Features:**
+- Natural language chat interface
+- Personalized financial advice
+- Question answering system
+- Contextual recommendations
+- Learning from user interactions
+- Multi-turn conversations
+- Financial education content
+
+**Technology Stack (Tentative):**
+- OpenAI GPT-4 API or similar LLM
+- LangChain for conversation management
+- Vector database for context (Pinecone/Weaviate)
+- Fine-tuned model on financial data
+- RAG (Retrieval Augmented Generation)
+
+**Note:** Detailed planning and documentation will be created after Phase 5 completion.
+
+---
+
+#### Low Priority / Future Enhancements (Post-Phase 6)
+
+12. **Finance News Feed** *(Backlog ID: 13)*
+    - Integrate news API (NewsAPI or similar)
+    - Filter by category
+    - Personalized recommendations
+    - **Effort:** 3 days
+    - **Risk:** API rate limits, content quality
+
+13. **Mini Finance Game** *(Backlog ID: 15)*
+    - Interactive learning game
+    - Financial concept demonstrations
+    - Gamification elements
+    - **Effort:** 7 days
+    - **Risk:** Scope creep
+
+14. **Social Features** *(New)*
+    - Anonymous community insights
+    - Compare with peers (anonymized)
+    - Financial tips sharing
+    - **Effort:** 5 days
+    - **Risk:** Privacy concerns, moderation
+
+15. **Bank Account Integration** *(New)*
+    - Plaid API integration
+    - Automatic transaction import
+    - Real-time balance tracking
+    - **Effort:** 10 days
+    - **Risk:** Security, compliance, API costs
 
 ---
 
 ## 🚀 Immediate Action Items (Next 7 Days)
 
-### Week of Feb 1-7, 2026
+### Week of Feb 10-16, 2026
 
 **Critical (P0) - Must Complete:**
-1. ✅ ~~Fix investment recommendations API format~~ *(deploying)*
-2. Verify auth flow works end-to-end on production
-3. Test all features on deployed app
-4. Fix any critical bugs discovered
+1. ✅ ~~Fix investment recommendations API format~~ *(complete)*
+2. ✅ ~~FinCore template conversion~~ *(complete)*
+3. ✅ ~~Logo navigation to landing page~~ *(complete)*
+4. ✅ ~~Tech stack display on landing page~~ *(complete)*
+5. 📋 Review and approve SmartFin 2.0 Enhancement Plan
+6. 🔧 Set up development environment for Phase 5
+7. 🗄️ Plan PostgreSQL migration from SQLite
 
 **High Priority (P1) - Should Complete:**
-5. Add loading states to auth forms
-6. Improve error messages (user-friendly)
-7. Add email validation on registration
-8. Implement token refresh logic in frontend
-9. Add "Remember Me" functionality
+8. 🚀 Begin Phase 5.1: User Profile Management
+9. 📊 Create database schema for new features
+10. 🔌 Set up new API endpoints structure (/api/v2/)
+11. 📝 Create user stories for each Phase 5 feature
+12. 🧪 Set up testing framework for new features
 
 **Medium Priority (P2) - Nice to Have:**
-10. Add user profile page (basic)
-11. Store analysis history (last 3 results)
-12. Add "Save Results" button
-13. Improve mobile layout for forms
-14. Add tooltips for financial terms
+13. 📚 Create technical documentation for new architecture
+14. 🎨 Design mockups for new dashboard components
+15. 📈 Set up analytics tracking for feature usage
+16. 🔐 Security audit of current authentication system
 
 ---
 
@@ -338,18 +469,67 @@ User Input (React)
       - A pipeline to periodically ingest, validate, and anonymize data for model training
    - **Impact:** Moving from synthetic to real data is essential to improve model accuracy and generalization; expect iterative labeling, cleaning, and feature engineering cycles.
 
-2. **Database Migration** - SQLite → PostgreSQL
+2. **Risk Tolerance Personalization** - Integrate risk score into recommendations
+   - **Current State:** Risk tolerance score (1-10) is calculated and stored but not used for personalization
+   - **Opportunity:** Use risk score to personalize investment recommendations, financial guidance, and goal suggestions
+   - **Implementation Areas:**
+     - Investment recommendations: Adjust portfolio allocation based on risk score
+       - Conservative (1-3): 60% bonds, 30% fixed deposits, 10% liquid funds
+       - Moderate (4-6): 40% index funds, 30% bonds, 30% blue-chip stocks
+       - Aggressive (7-10): 50% growth stocks, 30% small-cap funds, 20% index funds
+     - Financial guidance: Tailor advice to risk profile
+       - Conservative: Focus on savings, emergency funds, debt reduction
+       - Moderate: Balance between savings and growth
+       - Aggressive: Emphasize investment opportunities, wealth building
+     - Goal recommendations: Suggest appropriate timelines and strategies
+     - Alert thresholds: Adjust sensitivity based on risk tolerance
+   - **Effort:** 3 days
+   - **Impact:** High - Significantly improves personalization and user value
+   - **Priority:** High (should be included in Phase 5.2)
+   - **Dependencies:** User Profile Management (Phase 5.1)
+
+3. **Notification System Implementation** - Build actual notification infrastructure
+   - **Current State:** Notification preferences UI and storage are fully implemented, but no actual notifications are sent
+   - **What's Implemented:**
+     - ✅ Database schema for notification preferences (email, push, in-app, frequency)
+     - ✅ Backend API endpoints for CRUD operations on preferences
+     - ✅ Frontend UI for viewing preferences (ProfilePage.jsx)
+     - ✅ Frontend UI for editing preferences (ProfileEditForm.jsx)
+     - ✅ Validation and property-based tests
+   - **What's Missing:**
+     - ❌ Email service integration (SMTP/SendGrid/AWS SES)
+     - ❌ Push notification service (Web Push API/Firebase Cloud Messaging)
+     - ❌ In-app notification center/toast system
+     - ❌ Notification triggering logic (alerts, goals, insights)
+     - ❌ Notification queue/scheduling system
+     - ❌ Notification templates and content generation
+   - **Implementation Areas:**
+     - Email notifications: Financial alerts, goal progress, weekly summaries
+     - Push notifications: Real-time alerts for anomalies, budget overruns
+     - In-app notifications: Insights, tips, achievement badges
+     - Notification scheduling: Respect frequency preferences (immediate/daily/weekly)
+   - **Technology Options:**
+     - Email: SendGrid (free tier: 100 emails/day), AWS SES, or SMTP
+     - Push: Web Push API (free), Firebase Cloud Messaging (free tier)
+     - Queue: Celery + Redis, or simple cron jobs for batch processing
+   - **Effort:** 5-7 days
+   - **Impact:** High - Completes the notification preferences feature and improves user engagement
+   - **Priority:** Medium (Phase 5.2 or later)
+   - **Dependencies:** User Profile Management (Phase 5.1), Budget Planner, Advanced Analysis Engine
+   - **Cost Consideration:** Free tiers available for all services, suitable for college project
+
+4. **Database Migration** - SQLite → PostgreSQL
    - Current: SQLite (not ideal for production)
    - Target: PostgreSQL on Render
    - **Effort:** 2 days
    - **Impact:** Better scalability, concurrent access
 
-3. **API Rate Limiting**
+5. **API Rate Limiting**
    - Protect against abuse
    - Implement per-user rate limits
    - **Effort:** 1 day
 
-4. **Logging & Monitoring**
+6. **Logging & Monitoring**
    - Add structured logging
    - Set up error tracking (Sentry)
    - Performance monitoring
@@ -378,36 +558,52 @@ User Input (React)
    Implement these steps incrementally — start with database and storage migrations, then add observability, secrets manager, and finally full CI/CD and autoscaling.
 
 ### Medium Priority
-5. **Test Coverage**
+6. **Test Coverage**
    - Current: ~40% coverage
    - Target: >80% coverage
    - Add integration tests
    - Add E2E tests (Playwright/Cypress)
    - **Effort:** 3 days
 
-6. **API Documentation**
+7. **API Documentation**
    - Add OpenAPI/Swagger docs
    - Interactive API explorer
    - **Effort:** 1 day
 
-7. **Code Refactoring**
+8. **Code Refactoring**
    - Split large components
    - Extract reusable hooks
    - Improve error handling consistency
    - **Effort:** 2 days
 
 ### Low Priority
-8. **Internationalization (i18n)**
+9. **"Remember Me" Functionality** - Make the checkbox actually work
+   - **Current State:** Checkbox exists in login form but has no effect on authentication
+   - **Current Behavior:** All users get 1-hour access token + 30-day refresh token regardless of checkbox state
+   - **What's Missing:**
+     - Frontend doesn't send `rememberMe` parameter to backend
+     - Backend doesn't check for `rememberMe` parameter
+     - No conditional token expiry based on user preference
+   - **Implementation:**
+     - Frontend: Send `rememberMe` boolean with login request
+     - Backend: Check `rememberMe` parameter and adjust token expiry
+     - When checked: Extended access token (e.g., 30 days) or auto-refresh in background
+     - When unchecked: Short access token (1 hour) and shorter/no refresh token
+   - **Effort:** 0.5 days (4 hours)
+   - **Impact:** Low - Improves UX for users who want persistent sessions
+   - **Priority:** Low (nice-to-have polish)
+
+10. **Internationalization (i18n)**
    - Support multiple languages
    - Currency localization
    - **Effort:** 3 days
 
-9. **Dark Mode**
+11. **Dark Mode**
    - Add theme toggle
    - Persist preference
    - **Effort:** 1 day
 
-10. **Animations & Transitions**
+12. **Animations & Transitions**
     - Smooth page transitions
     - Loading animations
     - **Effort:** 2 days
@@ -780,13 +976,17 @@ User Input (React)
 |----------|--------|----------|-------------|
 | **Core Features** | ✅ Complete | 100% | ✅ Jan 31 |
 | **Deployment** | ✅ Live | 100% | ✅ Feb 1 |
-| **Authentication** | ✅ Working | 95% | ✅ Feb 1 |
-| **Investment Recommendations** | 🔄 Fixing | 95% | Feb 1 |
-| **User Profile** | ⏳ Planned | 0% | Feb 10 |
-| **Historical Tracking** | ⏳ Planned | 0% | Feb 15 |
-| **Advanced Features** | ⏳ Backlog | 0% | Mar 15 |
-| **Testing (80% coverage)** | 🔄 In Progress | 40% | Feb 25 |
-| **Documentation** | ✅ Good | 80% | Mar 1 |
+| **Authentication** | ✅ Working | 100% | ✅ Feb 1 |
+| **FinCore UI Conversion** | ✅ Complete | 100% | ✅ Feb 10 |
+| **Investment Recommendations** | ✅ Working | 100% | ✅ Feb 1 |
+| **SmartFin 2.0 Planning** | ✅ Complete | 100% | ✅ Feb 10 |
+| **User Profile** | ⏳ Planned | 0% | Feb 17 |
+| **Historical Tracking** | ⏳ Planned | 0% | Feb 24 |
+| **Budget Planner** | ⏳ Planned | 0% | Mar 3 |
+| **Core Feature Overhaul** | ⏳ Planned | 0% | Mar 24 |
+| **AI Guidance Engine** | ⏳ Future | 0% | May 15 |
+| **Testing (80% coverage)** | 🔄 In Progress | 40% | Apr 1 |
+| **Documentation** | ✅ Good | 85% | Mar 15 |
 
 ---
 
@@ -797,10 +997,15 @@ User Input (React)
 - ✅ **Jan 31, 2026** - All core features implemented
 - ✅ **Feb 1, 2026** - Production deployment live
 - ✅ **Feb 1, 2026** - Authentication system integrated
-- 🎯 **Feb 7, 2026** - All bugs fixed, stable production
-- 🎯 **Feb 15, 2026** - User profiles and history
-- 🎯 **Mar 1, 2026** - Advanced features complete
-- 🎯 **Mar 15, 2026** - Public launch
+- ✅ **Feb 10, 2026** - FinCore UI conversion complete
+- ✅ **Feb 10, 2026** - SmartFin 2.0 enhancement plan documented
+- 🎯 **Feb 17, 2026** - User profile management complete
+- 🎯 **Feb 24, 2026** - Historical tracking complete
+- 🎯 **Mar 3, 2026** - Budget planner complete
+- 🎯 **Mar 24, 2026** - Core feature overhaul complete
+- 🎯 **Apr 1, 2026** - SmartFin 2.0 beta release
+- 🎯 **May 15, 2026** - AI guidance engine complete
+- 🎯 **May 30, 2026** - SmartFin 2.0 public launch
 
 ---
 

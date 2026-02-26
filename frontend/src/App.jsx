@@ -1,27 +1,40 @@
 import { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import './App.css';
-import FinancialForm from './components/FinancialForm';
-import ScoreDisplay from './components/ScoreDisplay';
-import SpendingChart from './components/SpendingChart';
-import RatiosDashboard from './components/RatiosDashboard';
-import AlertsPanel from './components/AlertsPanel';
-import GuidancePanel from './components/GuidancePanel';
-import InvestmentAdvice from './components/InvestmentAdvice';
-import WhatIfSimulator from './components/WhatIfSimulator';
 import api from './services/api';
-import AuthForm from './components/AuthForm';
+import ErrorBoundary from './components/ErrorBoundary';
+import LandingPage from './components/LandingPage';
+import AuthPage from './components/AuthPage';
+import MainDashboard from './components/MainDashboard';
+import ProfilePage from './components/ProfilePage';
+import ProfileEditForm from './components/ProfileEditForm';
+import GoalsManager from './components/GoalsManager';
+import RiskAssessment from './components/RiskAssessment';
+import SIPCalculator from './components/SIPCalculator';
+import ForgotPassword from './components/ForgotPassword';
+import EmailVerification from './components/EmailVerification';
 
-function App() {
+// Wrapper component to use navigate hook
+function AppContent() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [currentData, setCurrentData] = useState(null);
   const [error, setError] = useState(null);
   const [user, setUser] = useState(null);
-  const [currentTime, setCurrentTime] = useState(new Date());
 
+  // Check for stored token on app load
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    const storedToken = api.getStoredToken();
+    if (storedToken) {
+      // Set the token in API headers
+      api.setAuthToken(storedToken);
+      // Get email from localStorage
+      const email = localStorage.getItem('userEmail') || 'user@smartfin.com';
+      setUser({ 
+        email: email
+      });
+    }
   }, []);
 
   const handleAnalyze = async (financialData) => {
@@ -55,166 +68,138 @@ function App() {
     const token = authResponse?.token;
     if (token) {
       api.setAuthToken(token);
-      const userData = authResponse?.user || {};
+      // Get email from localStorage or authResponse
+      const email = localStorage.getItem('userEmail') || authResponse?.user?.email || authResponse?.email || 'user@smartfin.com';
       setUser({ 
-        id: userData.id, 
-        email: userData.username || userData.email 
+        id: authResponse?.user?.id || authResponse?.id, 
+        email: email
       });
+      navigate('/dashboard'); // Navigate to dashboard after successful auth
     }
+  };
+
+  const handleGetStarted = () => {
+    if (user) {
+      // If already logged in, go directly to dashboard
+      navigate('/dashboard');
+    } else {
+      // Otherwise show auth page
+      navigate('/auth');
+    }
+  };
+
+  const handleBackToLanding = () => {
+    navigate('/');
   };
 
   const handleLogout = () => {
     api.setAuthToken(null);
     setUser(null);
+    setResult(null);
+    setCurrentData(null);
+    setError(null);
+    navigate('/');
+  };
+
+  // Protected Route Component
+  const ProtectedRoute = ({ children }) => {
+    if (!user) {
+      return <Navigate to="/auth" replace />;
+    }
+    return children;
   };
 
   return (
-    <div className="app">
-      <div className="scanlines"></div>
-      <div className="grid-overlay"></div>
-      
-      <header className="app-header">
-        <div className="container">
-          <div className="header-content">
-            <div className="logo-section">
-              <div className="logo-bracket">[</div>
-              <h1 className="app-title">SMARTFIN</h1>
-              <div className="logo-bracket">]</div>
-            </div>
-            <div className="header-meta">
-              <div className="status-indicator">
-                <span className="status-dot"></span>
-                <span className="status-text">SYSTEM ACTIVE</span>
-              </div>
-              <div className="time-display">
-                {currentTime.toLocaleTimeString('en-US', { hour12: false })}
-              </div>
-            </div>
-          </div>
-          <div className="app-subtitle">
-            <span className="subtitle-label">ML-POWERED</span>
-            <span className="subtitle-separator">|</span>
-            <span className="subtitle-label">FINANCIAL INTELLIGENCE</span>
-            <span className="subtitle-separator">|</span>
-            <span className="subtitle-label">REAL-TIME ANALYSIS</span>
-          </div>
-        </div>
-      </header>
+    <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<LandingPage onGetStarted={handleGetStarted} />} />
+          
+          <Route path="/auth" element={<AuthPage onAuthSuccess={handleAuth} onBack={handleBackToLanding} />} />
+          
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          
+          <Route path="/verify-email" element={<EmailVerification />} />
 
-      <main className="app-main">
-        <div className="container">
-          {error && (
-            <div className="error-banner">
-              <div className="error-icon">⚠</div>
-              <div className="error-content">
-                <div className="error-title">SYSTEM ERROR</div>
-                <div className="error-message">{error}</div>
-              </div>
-            </div>
-          )}
+          {/* Protected Routes */}
+          <Route path="/dashboard" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading dashboard. Please try again.">
+                <MainDashboard
+                  user={user}
+                  onLogout={handleLogout}
+                  onAnalyze={handleAnalyze}
+                  onWhatIf={handleWhatIf}
+                  loading={loading}
+                  result={result}
+                  currentData={currentData}
+                  error={error}
+                />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
 
-          {!user ? (
-            <div className="auth-container">
-              <AuthForm onAuth={handleAuth} />
-            </div>
-          ) : (
-            <>
-              <div className="user-panel">
-                <div className="user-info">
-                  <span className="user-label">OPERATOR</span>
-                  <span className="user-email">{user.email}</span>
-                </div>
-                <button className="logout-btn" onClick={handleLogout}>
-                  <span className="btn-bracket">[</span>
-                  DISCONNECT
-                  <span className="btn-bracket">]</span>
-                </button>
-              </div>
+          <Route path="/profile" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading profile. Please try again.">
+                <ProfilePage />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
 
-              <FinancialForm onSubmit={handleAnalyze} loading={loading} />
-            </>
-          )}
+          <Route path="/profile/create" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading profile form. Please try again.">
+                <ProfileEditForm />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
 
-          {loading && (
-            <div className="loading-container">
-              <div className="loading-content">
-                <div className="loading-bars">
-                  <div className="loading-bar"></div>
-                  <div className="loading-bar"></div>
-                  <div className="loading-bar"></div>
-                  <div className="loading-bar"></div>
-                  <div className="loading-bar"></div>
-                </div>
-                <div className="loading-text">
-                  <span className="loading-label">PROCESSING</span>
-                  <span className="loading-dots"></span>
-                </div>
-                <div className="loading-status">Analyzing financial data streams...</div>
-              </div>
-            </div>
-          )}
+          <Route path="/profile/edit" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading profile form. Please try again.">
+                <ProfileEditForm />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
 
-          {result && !loading && (
-            <div className="results-section">
-              <div className="results-header">
-                <div className="results-title">ANALYSIS COMPLETE</div>
-                <div className="results-timestamp">
-                  {new Date().toLocaleString('en-US', { 
-                    month: 'short', 
-                    day: 'numeric', 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                  })}
-                </div>
-              </div>
+          <Route path="/goals" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading goals manager. Please try again.">
+                <GoalsManager />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
 
-              <ScoreDisplay 
-                score={result.score} 
-                classification={result.classification} 
-              />
+          <Route path="/risk-assessment" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading risk assessment. Please try again.">
+                <RiskAssessment />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
 
-              <div className="dashboard-grid">
-                <SpendingChart patterns={result.patterns} />
-                <RatiosDashboard patterns={result.patterns} />
-              </div>
+          <Route path="/sip-calculator" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading SIP calculator. Please try again.">
+                <SIPCalculator />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
 
-              <AlertsPanel anomalies={result.anomalies} />
-              
-              <GuidancePanel guidance={result.guidance} />
-              
-              <InvestmentAdvice investments={result.investments} />
-              
-              <WhatIfSimulator 
-                currentData={currentData} 
-                onSimulate={handleWhatIf}
-              />
-            </div>
-          )}
-        </div>
-      </main>
+          {/* Catch all - redirect to home */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+  );
+}
 
-      <footer className="app-footer">
-        <div className="container">
-          <div className="footer-content">
-            <div className="footer-section">
-              <span className="footer-label">VERSION</span>
-              <span className="footer-value">2.0.4</span>
-            </div>
-            <div className="footer-section">
-              <span className="footer-label">STATUS</span>
-              <span className="footer-value">OPERATIONAL</span>
-            </div>
-            <div className="footer-section">
-              <span className="footer-label">LATENCY</span>
-              <span className="footer-value">12ms</span>
-            </div>
-            <div className="footer-section footer-note">
-              <span className="footer-label">⚠ EDUCATIONAL USE ONLY</span>
-            </div>
-          </div>
-        </div>
-      </footer>
-    </div>
+// Main App component with Router wrapper
+function App() {
+  return (
+    <ErrorBoundary fallbackMessage="Something went wrong with the application. Please refresh the page.">
+      <Router>
+        <AppContent />
+      </Router>
+    </ErrorBoundary>
   );
 }
 

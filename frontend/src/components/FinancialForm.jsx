@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import './FinancialForm.css';
 
 const FinancialForm = ({ onSubmit, loading }) => {
   const [formData, setFormData] = useState({
@@ -49,124 +48,82 @@ const FinancialForm = ({ onSubmit, loading }) => {
     });
   };
 
+  const fields = [
+    { name: 'income', label: 'Monthly Income', icon: 'solar:wallet-money-linear', placeholder: '50000', color: 'cyan' },
+    { name: 'rent', label: 'Rent/Housing', icon: 'solar:home-2-linear', placeholder: '15000', color: 'purple' },
+    { name: 'food', label: 'Food & Groceries', icon: 'solar:cart-large-2-linear', placeholder: '8000', color: 'green' },
+    { name: 'travel', label: 'Travel & Transport', icon: 'solar:bus-linear', placeholder: '3000', color: 'blue' },
+    { name: 'shopping', label: 'Shopping & Entertainment', icon: 'solar:bag-smile-linear', placeholder: '5000', color: 'pink' },
+    { name: 'emi', label: 'EMI & Loans', icon: 'solar:card-linear', placeholder: '10000', color: 'orange' },
+    { name: 'savings', label: 'Monthly Savings', icon: 'solar:safe-square-linear', placeholder: '9000', color: 'emerald' },
+  ];
+
   return (
-    <div className="financial-form-container">
-      <div className="form-header">
-        <h2>💰 Enter Your Financial Details</h2>
-        <p>Fill in your monthly financial information</p>
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* Form Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {fields.map((field) => (
+          <div key={field.name} className="space-y-2 group">
+            <label 
+              htmlFor={field.name} 
+              className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-cyan-400 flex items-center gap-2"
+            >
+              <iconify-icon icon={field.icon} width="14" className={`text-${field.color}-400`}></iconify-icon>
+              {field.label}
+            </label>
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 text-sm font-mono">₹</span>
+              <input
+                type="number"
+                id={field.name}
+                name={field.name}
+                value={formData[field.name]}
+                onChange={handleChange}
+                placeholder={field.placeholder}
+                required
+                min="0"
+                className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-3 pl-8 text-sm text-white placeholder-white/20 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 transition-all duration-200 font-mono"
+              />
+            </div>
+          </div>
+        ))}
       </div>
-      
-      <form onSubmit={handleSubmit} className="financial-form">
-        <div className="form-grid">
-          <div className="form-group">
-            <label htmlFor="income">Monthly Income (₹)</label>
-            <input
-              type="number"
-              id="income"
-              name="income"
-              value={formData.income}
-              onChange={handleChange}
-              placeholder="50000"
-              required
-              min="0"
-            />
-          </div>
 
-          <div className="form-group">
-            <label htmlFor="rent">Rent/Housing (₹)</label>
-            <input
-              type="number"
-              id="rent"
-              name="rent"
-              value={formData.rent}
-              onChange={handleChange}
-              placeholder="15000"
-              required
-              min="0"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="food">Food & Groceries (₹)</label>
-            <input
-              type="number"
-              id="food"
-              name="food"
-              value={formData.food}
-              onChange={handleChange}
-              placeholder="8000"
-              required
-              min="0"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="travel">Travel & Transport (₹)</label>
-            <input
-              type="number"
-              id="travel"
-              name="travel"
-              value={formData.travel}
-              onChange={handleChange}
-              placeholder="3000"
-              required
-              min="0"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="shopping">Shopping & Entertainment (₹)</label>
-            <input
-              type="number"
-              id="shopping"
-              name="shopping"
-              value={formData.shopping}
-              onChange={handleChange}
-              placeholder="5000"
-              required
-              min="0"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="emi">EMI & Loans (₹)</label>
-            <input
-              type="number"
-              id="emi"
-              name="emi"
-              value={formData.emi}
-              onChange={handleChange}
-              placeholder="10000"
-              required
-              min="0"
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="savings">Monthly Savings (₹)</label>
-            <input
-              type="number"
-              id="savings"
-              name="savings"
-              value={formData.savings}
-              onChange={handleChange}
-              placeholder="9000"
-              required
-              min="0"
-            />
-          </div>
-        </div>
-
-        <div className="form-actions">
-          <button type="submit" className="btn btn-primary" disabled={loading}>
-            {loading ? 'Analyzing...' : '🔍 Analyze My Finances'}
-          </button>
-          <button type="button" className="btn btn-secondary" onClick={loadSampleData} disabled={loading}>
-            Load Sample Data
-          </button>
-        </div>
-      </form>
-    </div>
+      {/* Actions */}
+      <div className="flex flex-col sm:flex-row gap-3 pt-4">
+        <button
+          type="submit"
+          disabled={loading}
+          className="relative flex-1 group overflow-hidden rounded-lg bg-white py-3 transition-all hover:bg-white/90 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 focus:ring-offset-black disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {!loading && (
+            <>
+              <div className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-cyan-400/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+              <span className="relative text-sm font-semibold text-black flex items-center justify-center gap-2">
+                <iconify-icon icon="solar:chart-2-linear" width="18"></iconify-icon>
+                Analyze My Finances
+              </span>
+            </>
+          )}
+          {loading && (
+            <div className="flex items-center justify-center text-black gap-2">
+              <iconify-icon icon="solar:spinner-solid" className="animate-spin text-lg"></iconify-icon>
+              <span className="text-sm font-semibold">Analyzing...</span>
+            </div>
+          )}
+        </button>
+        
+        <button
+          type="button"
+          onClick={loadSampleData}
+          disabled={loading}
+          className="flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 py-3 px-6 text-sm font-medium text-white hover:bg-white/10 hover:border-white/20 transition-all focus:outline-none focus:ring-2 focus:ring-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <iconify-icon icon="solar:document-add-linear" width="18"></iconify-icon>
+          Load Sample
+        </button>
+      </div>
+    </form>
   );
 };
 

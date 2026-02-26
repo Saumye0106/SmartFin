@@ -1,28 +1,127 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  color-scheme: light;
+/* Custom Styles from FinCore Template */
+@layer base {
+  html {
+    @apply h-full antialiased;
+  }
   
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  body {
+    background-color: #000;
+    color: #fff;
+  }
+  
+  ::selection {
+    background-color: rgba(6, 182, 212, 0.3);
+    color: #a5f3fc;
+  }
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* Stars Animation */
+@keyframes stars {
+  0% {
+    box-shadow: 
+      100px 200px #fff, 200px 400px #fff, 300px 100px #fff,
+      400px 300px #fff, 500px 150px #fff, 600px 350px #fff,
+      700px 250px #fff, 800px 450px #fff, 900px 200px #fff,
+      1000px 400px #fff, 1100px 100px #fff, 1200px 300px #fff;
+  }
+  100% {
+    box-shadow: 
+      150px 250px #fff, 250px 450px #fff, 350px 150px #fff,
+      450px 350px #fff, 550px 200px #fff, 650px 400px #fff,
+      750px 300px #fff, 850px 500px #fff, 950px 250px #fff,
+      1050px 450px #fff, 1150px 150px #fff, 1250px 350px #fff;
+  }
 }
 
-body {
-  margin: 0;
-  min-height: 100vh;
+.stars {
+  animation: stars 50s linear infinite;
 }
 
-#root {
-  min-height: 100vh;
+/* Grid Background */
+.bg-grid {
+  background-size: 50px 50px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 80%);
 }
 
+/* Text Gradients */
+.text-gradient {
+  background: linear-gradient(to right bottom, #fff 30%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #030303;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #404040;
+}
+
+/* Utilities */
+.perspective-1000 {
+  perspective: 1000px;
+}
+
+.rotate-x-3 {
+  transform: rotateX(3deg);
+}
+
+/* Glass Panel */
+.glass-panel {
+  background: rgba(10, 10, 10, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 1), 0 4px 30px rgba(0, 0, 0, 0.3);
+}
+
+.glass-panel-hover {
+  transition: all 0.3s ease;
+}
+
+.glass-panel-hover:hover {
+  background: rgba(10, 10, 10, 0.8);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Hide UnicornStudio Watermark */
+[data-us-project] a[href*="unicorn.studio"],
+[data-us-project] a[target="_blank"],
+div[style*="unicorn"] a,
+a[href*="unicornstudio"],
+a[href*="unicorn.studio"] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  position: absolute !important;
+  left: -9999px !important;
+}
+
+/* Hide any iframe or div that might contain the watermark */
+[data-us-project] > div > a,
+[data-us-project] div[style*="position"] a {
+  display: none !important;
+}
