@@ -71,6 +71,9 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             phone TEXT,
+            email_verified INTEGER DEFAULT 0,
+            email_verification_token TEXT,
+            email_verification_expires TEXT,
             created_at TEXT NOT NULL
         )
     ''')
