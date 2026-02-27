@@ -1,0 +1,37 @@
+/* Payment Form Styles */
+.payment-form-container {
+  /* Additional custom styles if needed */
+}
+
+/* Date input styling for dark theme */
+.payment-form-container input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
+/* Number input arrows styling */
+.payment-form-container input[type="number"]::-webkit-inner-spin-button,
+.payment-form-container input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.5;
+}
+
+.payment-form-container input[type="number"]:hover::-webkit-inner-spin-button,
+.payment-form-container input[type="number"]:hover::-webkit-outer-spin-button {
+  opacity: 1;
+}
+
+/* Payment history timeline animation */
+.payment-form-container .space-y-2 > div {
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}

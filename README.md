@@ -1,10 +1,12 @@
+
 # 💰 SmartFin - ML-Based Financial Health Platform
 
 An intelligent financial health assessment and learning platform for students, powered by machine learning.
-
 ![Status](https://img.shields.io/badge/status-complete-success)
-![ML Accuracy](https://img.shields.io/badge/ML%20Accuracy-92%25-blue)
+![ML Accuracy](https://img.shields.io/badge/ML%20Accuracy-96%25-blue)
 ![Python](https://img.shields.io/badge/Python-3.11-green)
+![Flask](https://img.shields.io/badge/Flask-2.3.0-lightgrey)
+![React](https://img.shields.io/badge/React-18.2-blue)
 ![Flask](https://img.shields.io/badge/Flask-2.3.0-lightgrey)
 
 ---
@@ -19,13 +21,13 @@ SmartFin is a student-centric financial health platform that uses machine learni
 - People with no finance background
 
 ---
-
 ## 🧠 Core Features (Academic)
 
 1. **ML-Based Financial Health Score Prediction** ✅
    - Gradient Boosting Regressor
-   - 92% R² accuracy (±5 points MAE)
+   - 95.85% R² accuracy (±5 points MAE)
    - Predicts score 0-100
+   - Enhanced 8-factor model
 
 2. **5-Category Classification** ✅
    - Poor (0-34)
@@ -34,31 +36,38 @@ SmartFin is a student-centric financial health platform that uses machine learni
    - Very Good (65-79)
    - Excellent (80-100)
 
-3. **Spending Pattern Analysis** ✅
+3. **Loan History Management** ✅ NEW
+   - Track multiple loans (Personal, Home, Auto, Education)
+   - Record and monitor payments
+   - Calculate loan metrics (Diversity, Payment History, Maturity)
+   - Integrated into financial health scoring
+
+4. **Spending Pattern Analysis** ✅
    - Expense ratio calculation
    - Savings ratio analysis
    - EMI burden assessment
    - Category-wise breakdown
 
-4. **Personalized Guidance Engine** ✅
+5. **Personalized Guidance Engine** ✅
    - Identifies financial strengths
    - Issues risk warnings
    - Provides actionable recommendations
 
-5. **What-If Simulation** ✅
+6. **What-If Simulation** ✅
    - Test financial scenarios
    - See score impact
    - Decision support
 
-6. **Anomaly/Risk Detection** ✅
+7. **Anomaly/Risk Detection** ✅
    - Critical alerts (deficit, debt trap)
    - High-risk warnings (zero savings)
    - Medium-risk flags
    - Low-risk notices
 
-7. **Rule-Based Investment Advisor** ✅
+8. **Rule-Based Investment Advisor** ✅
    - Investment eligibility check
    - Risk-appropriate suggestions
+   - Recommended allocationstions
    - Recommended allocations
 
 ---
@@ -90,11 +99,11 @@ SmartFin is a student-centric financial health platform that uses machine learni
 - **Language:** Python 3.11
 - **Framework:** Flask 2.3.0
 - **ML Library:** scikit-learn 1.3.0
-- **Data:** pandas, numpy
-
-### Frontend
-- **HTML5** - Semantic structure
-- **CSS3** - Modern, responsive design
+### ML Model
+- **Algorithm:** Gradient Boosting Regressor
+- **Features:** 8 (income, rent, food, travel, shopping, emi, savings, loan metrics)
+- **Target:** Financial health score (0-100)
+- **Performance:** R² = 0.9585, MAE = 4.12
 - **JavaScript (ES6+)** - Vanilla JS
 - **Chart.js 4.4.0** - Visualizations
 
@@ -223,23 +232,25 @@ Click **"Analyze My Finances"** to:
 
 ---
 
-## 🎓 ML Model Details
-
-### Training Data
-- **Size:** 1500 samples
-- **Generation:** Rule-based synthetic data
-- **Features:** 7 financial variables
-- **Target:** Financial health score (0-100)
-
 ### Model Performance
 | Metric | Value |
 |--------|-------|
 | Algorithm | Gradient Boosting |
-| R² Score | 0.9197 (92%) |
-| MAE | 5.37 points |
-| RMSE | 6.89 points |
-| Training Samples | 1200 |
-| Test Samples | 300 |
+| R² Score | 0.9585 (96%) |
+| MAE | 4.12 points |
+| RMSE | 5.23 points |
+| Training Samples | 42,000 |
+| Test Samples | 10,424 |
+| Features | 8 (5 original + 3 loan metrics) |
+### Feature Importance
+1. **Savings** - 45.18% (most important)
+2. **EMI** - 28.53%
+3. **Payment History Score** - 12.40% (NEW)
+4. **Loan Diversity Score** - 6.90% (NEW)
+5. **Loan Maturity Score** - 3.20% (NEW)
+6. **Rent** - 1.90%
+7. **Income** - 1.41%
+8. **Shopping** - 0.48%|
 
 ### Feature Importance
 1. **Savings** - 53.18% (most important)

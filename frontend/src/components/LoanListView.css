@@ -1,0 +1,25 @@
+/* Loan List View Styles */
+.loan-list-view {
+  /* Additional custom styles if needed */
+}
+
+/* Select dropdown styling for dark theme */
+.loan-list-view select {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right 0.5rem center;
+  background-repeat: no-repeat;
+  background-size: 1.5em 1.5em;
+  padding-right: 2.5rem;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+/* Smooth transitions for loan cards */
+.loan-list-view .group {
+  transition: all 0.2s ease;
+}
+
+.loan-list-view .group:hover {
+  transform: translateY(-2px);
+}

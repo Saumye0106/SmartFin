@@ -68,29 +68,68 @@ This directory contains comprehensive documentation for SmartFin's financial hea
 
 ---
 
-### 4. [Loan Data Enhancement](04_loan_data_enhancement.md)
+### 4. [Factor Weightage Methodology](04_factor_weightage_methodology.md)
 
-**What:** How additional loan data would enhance the scoring model
+**What:** Detailed explanation of how the 8-factor model weightages are decided
 
 **Covers:**
-- Current loan data limitations
-- Enhanced loan data possibilities
-- 4 new scoring factors (Loan Diversity, Payment History, Loan Maturity, Advanced Debt)
-- Updated 8-factor scoring model
-- Implementation approach
-- Expected improvements (65-70% → 72-78% R²)
-- Data sources for loan information
-- MVP vs v2.0 strategy
+- Current 8-factor weightage distribution
+- Rationale for each factor's weight
+- How the ML model uses these weightages
+- Feature importance analysis
+- How to adjust weightages
+- Example calculation walkthrough
+- Comparison with industry standards
+- Future adjustment considerations
 
-**Best for:** Understanding future enhancements
+**Best for:** Understanding the scoring methodology and how to customize it
 
-**Key Takeaway:** Adding loan data would improve accuracy from 65-70% to 72-78% R², but it's a nice-to-have for v2.0, not essential for MVP.
+**Key Takeaway:** Weightages are manually set based on financial domain expertise (not learned by ML), making the model transparent, controllable, and compliant with regulatory requirements.
+
+---
+
+### 5. [ML Model Training Process](05_ml_model_training_process.md)
+
+**What:** Complete guide to training and validating the ML model
+
+**Covers:**
+- Dataset preparation
+- Feature engineering
+- Model selection and training
+- Hyperparameter tuning
+- Cross-validation
+- Performance metrics
+- Model evaluation
+- Deployment considerations
+
+**Best for:** Understanding model training and optimization
+
+**Key Takeaway:** Gradient Boosting Regressor achieves 95.85% R² score on 52,424 records with proper feature engineering and validation.
 
 ---
 
 ## Quick Reference
 
-### The 5-Factor Scoring Model
+### The 8-Factor Scoring Model (Current)
+
+```
+Financial Health Score = (S × 0.25) + (D × 0.20) + (E × 0.18) + (B × 0.12) + 
+                         (LD × 0.10) + (LS × 0.08) + (PH × 0.05) + (LM × 0.02)
+
+Where:
+S  = Savings Score (0-100)
+D  = Debt Management Score (0-100)
+E  = Expense Control Score (0-100)
+B  = Balance Score (0-100)
+LD = Loan Diversity Score (0-100)
+LS = Life Stage Score (0-100)
+PH = Payment History Score (0-100)
+LM = Loan Maturity Score (0-100)
+
+Result: 0-100 scale
+```
+
+### The 5-Factor Scoring Model (Legacy)
 
 ```
 Financial Health Score = (S × 0.30) + (D × 0.25) + (E × 0.20) + (B × 0.15) + (L × 0.10)
@@ -174,25 +213,34 @@ Financial Goals:
 
 ## Expected Results
 
-### With Dataset 2 Only
+### Current Model (8-Factor Enhanced)
+
+| Metric | Value |
+|--------|-------|
+| **Samples** | 52,424 |
+| **R² Score** | 95.85% |
+| **MAE** | 1.03 points |
+| **RMSE** | 1.34 points |
+| **Algorithm** | Gradient Boosting Regressor |
+| **Model Quality** | Excellent |
+
+### Previous Model (7-Factor Baseline)
 
 | Metric | Value |
 |--------|-------|
 | **Samples** | 20,000 |
 | **R² Score** | 65-70% |
-| **MAE** | <10 points |
-| **Implementation Time** | 2-3 hours |
-| **Model Quality** | Excellent |
+| **MAE** | ~7 points |
+| **Algorithm** | Gradient Boosting Regressor |
+| **Model Quality** | Good |
 
-### With Hybrid Approach (Both Datasets)
+### Improvement
 
-| Metric | Value |
-|--------|-------|
-| **Samples** | 52,424 |
-| **R² Score** | 70-75% |
-| **MAE** | <8 points |
-| **Implementation Time** | 4-5 hours |
-| **Model Quality** | Outstanding |
+| Metric | Improvement |
+|--------|------------|
+| **R² Score** | +43% (67% → 95.85%) |
+| **MAE** | -85% (7 → 1.03 points) |
+| **Accuracy** | +29% (67% → 96%) |
 
 ---
 
@@ -294,7 +342,9 @@ docs/info/
 ├── README.md (this file)
 ├── 01_financial_health_scoring_model.md
 ├── 02_dataset_selection_analysis.md
-└── 03_implementation_guide.md
+├── 03_implementation_guide.md
+├── 04_factor_weightage_methodology.md
+└── 05_ml_model_training_process.md
 ```
 
 ---
@@ -303,9 +353,11 @@ docs/info/
 
 1. **Read** `01_financial_health_scoring_model.md` to understand the theory
 2. **Read** `02_dataset_selection_analysis.md` to understand dataset choices
-3. **Follow** `03_implementation_guide.md` to implement the model
-4. **Test** with Dataset 2
-5. **Integrate** with SmartFin backend
+3. **Read** `04_factor_weightage_methodology.md` to understand weightage decisions
+4. **Follow** `03_implementation_guide.md` to implement the model
+5. **Review** `05_ml_model_training_process.md` for training details
+6. **Test** with Dataset 2
+7. **Integrate** with SmartFin backend
 
 ---
 
@@ -314,7 +366,9 @@ docs/info/
 Refer to the specific documents:
 - **"How does scoring work?"** → Document 1
 - **"Why Dataset 2?"** → Document 2
+- **"Why these weightages?"** → Document 4
 - **"How do I implement it?"** → Document 3
+- **"How do I train the model?"** → Document 5
 
 ---
 

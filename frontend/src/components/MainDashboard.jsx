@@ -8,6 +8,24 @@ import AlertsPanel from './AlertsPanel';
 import GuidancePanel from './GuidancePanel';
 import InvestmentAdvice from './InvestmentAdvice';
 import WhatIfSimulator from './WhatIfSimulator';
+import LoanMetricsDashboard from './LoanMetricsDashboard';
+import Sidebar from './Sidebar';
+import api from '../services/api';
+
+const Clock = () => {
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="text-[10px] font-mono text-cyan-400 bg-cyan-950/20 px-3 py-1.5 rounded-full border border-cyan-500/20">
+      {currentTime.toLocaleTimeString('en-US', { hour12: false })}
+    </div>
+  );
+};
 
 const MainDashboard = ({ 
   user, 
@@ -19,13 +37,14 @@ const MainDashboard = ({
   currentData, 
   error
 }) => {
-  const [currentTime, setCurrentTime] = useState(new Date());
   const navigate = useNavigate();
 
+  // Debug logging
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+    console.log('MainDashboard user object:', user);
+    console.log('User ID:', user?.id);
+    console.log('User email:', user?.email);
+  }, [user]);
 
   return (
     <div className="min-h-screen bg-[#030303] text-white">
@@ -60,14 +79,6 @@ const MainDashboard = ({
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => navigate('/sip-calculator')}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 hover:border-blue-500/40 transition-all text-xs font-medium text-blue-400"
-                title="SIP Calculator"
-              >
-                <iconify-icon icon="solar:calculator-linear" width="16"></iconify-icon>
-                <span className="hidden md:inline">SIP</span>
-              </button>
-              <button
                 onClick={() => navigate('/profile')}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/20 hover:border-cyan-500/40 transition-all text-xs font-medium text-cyan-400"
                 title="My Profile"
@@ -76,7 +87,7 @@ const MainDashboard = ({
                 <span className="hidden md:inline">Profile</span>
               </button>
               <div className="text-[10px] font-mono text-cyan-400 bg-cyan-950/20 px-3 py-1.5 rounded-full border border-cyan-500/20">
-                {currentTime.toLocaleTimeString('en-US', { hour12: false })}
+                <Clock />
               </div>
               <button 
                 onClick={onLogout}
@@ -90,8 +101,11 @@ const MainDashboard = ({
         </div>
       </nav>
 
+      {/* Sidebar */}
+      <Sidebar />
+
       {/* Main Content */}
-      <main className="relative z-10 pt-24 pb-16 px-6">
+      <main className="relative z-10 pt-24 pb-16 px-6 ml-20">
         <div className="max-w-7xl mx-auto">
           {/* Hero Section */}
           <section className="mb-12">
@@ -137,6 +151,18 @@ const MainDashboard = ({
               <FinancialForm onSubmit={onAnalyze} loading={loading} />
             </div>
           </section>
+
+          {/* Loan Metrics Section */}
+          {user && user.id && (
+            <section className="mb-12">
+              <div className="glass-panel rounded-xl p-8 border border-white/10">
+                <LoanMetricsDashboard 
+                  userId={user.id} 
+                  onFetchMetrics={(userId) => api.getLoanMetrics(userId)}
+                />
+              </div>
+            </section>
+          )}
 
           {/* Loading State */}
           {loading && (

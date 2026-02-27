@@ -1,0 +1,21 @@
+/* Loan Form Styles */
+.loan-form {
+  /* Additional custom styles if needed */
+}
+
+/* Date input styling for dark theme */
+.loan-form input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
+/* Number input arrows styling */
+.loan-form input[type="number"]::-webkit-inner-spin-button,
+.loan-form input[type="number"]::-webkit-outer-spin-button {
+  opacity: 0.5;
+}
+
+.loan-form input[type="number"]:hover::-webkit-inner-spin-button,
+.loan-form input[type="number"]:hover::-webkit-outer-spin-button {
+  opacity: 1;
+}

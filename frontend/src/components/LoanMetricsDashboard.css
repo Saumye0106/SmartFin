@@ -1,0 +1,106 @@
+/* Loan Metrics Dashboard Styles */
+.loan-metrics-dashboard {
+  /* Additional custom styles if needed */
+}
+
+/* Score card hover effects */
+.loan-metrics-dashboard .group:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+/* Progress bar animation */
+.loan-metrics-dashboard .bg-green-500,
+.loan-metrics-dashboard .bg-cyan-500,
+.loan-metrics-dashboard .bg-yellow-500,
+.loan-metrics-dashboard .bg-orange-500,
+.loan-metrics-dashboard .bg-red-500 {
+  transition: width 0.5s ease-out;
+}
+
+/* Score card entrance animation */
+.loan-metrics-dashboard > div > div {
+  animation: fadeInUp 0.4s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Stagger animation for grid items */
+.loan-metrics-dashboard .grid > div:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.loan-metrics-dashboard .grid > div:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.loan-metrics-dashboard .grid > div:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+/* Loading spinner animation */
+.loan-metrics-dashboard iconify-icon[icon="svg-spinners:ring-resize"] {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Loan type distribution bar animation */
+.loan-metrics-dashboard .loan-type-distribution .bg-cyan-500 {
+  animation: expandWidth 0.6s ease-out;
+}
+
+@keyframes expandWidth {
+  from {
+    width: 0;
+  }
+}
+
+/* Statistics card entrance animation */
+.loan-metrics-dashboard .space-y-3 > div {
+  animation: slideInLeft 0.3s ease-out;
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Responsive adjustments */
+@media (max-width: 1024px) {
+  .loan-metrics-dashboard .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .loan-metrics-dashboard h2 {
+    font-size: 1.25rem;
+  }
+  
+  .loan-metrics-dashboard .text-4xl {
+    font-size: 2rem;
+  }
+}

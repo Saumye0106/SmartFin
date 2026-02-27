@@ -8,16 +8,23 @@ axios.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      console.error('Authentication error:', error.response?.data);
-      console.error('Token:', localStorage.getItem('sf_token'));
+      console.error('=== 401 AUTHENTICATION ERROR ===');
+      console.error('Request URL:', error.config?.url);
+      console.error('Request method:', error.config?.method);
+      console.error('Request headers:', error.config?.headers);
+      console.error('Error response:', error.response?.data);
+      console.error('Token in localStorage:', localStorage.getItem('sf_token'));
+      console.error('Token in axios defaults:', axios.defaults.headers.common['Authorization']);
+      console.error('================================');
       
       // Token expired or invalid - redirect to login after a delay
       setTimeout(() => {
         localStorage.removeItem('sf_token');
         localStorage.removeItem('userEmail');
+        localStorage.removeItem('userId');
         delete axios.defaults.headers.common['Authorization'];
         window.location.href = '/auth';
-      }, 100); // Small delay to allow error to be logged
+      }, 2000); // Increased delay to 2 seconds to see console logs
     }
     return Promise.reject(error);
   }
@@ -451,6 +458,204 @@ const api = {
       throw new Error(errorMsg);
     }
   },
+
+  // Loan Management methods
+  async createLoan(loanData) {
+    try {
+      const token = this.getStoredToken();
+      console.log('createLoan - Token from localStorage:', token ? `${token.substring(0, 20)}...` : 'null');
+      console.log('createLoan - Global axios auth header:', axios.defaults.headers.common['Authorization']);
+      
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('createLoan - Making request to:', `${API_BASE_URL}/api/loans`);
+      console.log('createLoan - Loan data:', loanData);
+      
+      const response = await axios.post(`${API_BASE_URL}/api/loans`, loanData, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      console.log('createLoan - Success:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Create loan error:', error);
+      console.error('Error response:', error?.response);
+      console.error('Error status:', error?.response?.status);
+      console.error('Error data:', error?.response?.data);
+      const errorMsg = error?.response?.data?.message || error?.response?.data?.error || 'Failed to create loan';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getUserLoans(userId) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await axios.get(`${API_BASE_URL}/api/loans/user/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Get user loans error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to get loans';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getLoan(loanId) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await axios.get(`${API_BASE_URL}/api/loans/${loanId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Get loan error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to get loan';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async updateLoan(loanId, updates) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await axios.put(`${API_BASE_URL}/api/loans/${loanId}`, updates, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Update loan error:', error);
+      const errorMsg = error?.response?.data?.message || error?.response?.data?.error || 'Failed to update loan';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async deleteLoan(loanId) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('Deleting loan:', loanId);
+      const response = await axios.delete(`${API_BASE_URL}/api/loans/${loanId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log('Delete response:', response.status, response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Delete loan error:', error);
+      const errorMsg = error?.response?.data?.message || error?.response?.data?.error || 'Failed to delete loan';
+      console.error('Error message:', errorMsg);
+      throw new Error(errorMsg);
+    }
+  },
+
+  async recordPayment(loanId, paymentData) {
+    try {
+      const token = this.getStoredToken();
+      console.log('recordPayment - Token:', token ? `${token.substring(0, 20)}...` : 'null');
+      console.log('recordPayment - Loan ID:', loanId);
+      console.log('recordPayment - Payment data:', paymentData);
+      
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('recordPayment - Making request to:', `${API_BASE_URL}/api/loans/${loanId}/payments`);
+      const response = await axios.post(`${API_BASE_URL}/api/loans/${loanId}/payments`, paymentData, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      console.log('recordPayment - Success:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Record payment error:', error);
+      console.error('Error response:', error?.response?.data);
+      console.error('Error status:', error?.response?.status);
+      const errorMsg = error?.response?.data?.message || error?.response?.data?.error || error.message || 'Failed to record payment';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getPaymentHistory(loanId) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await axios.get(`${API_BASE_URL}/api/loans/${loanId}/payments`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Get payment history error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to get payment history';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async deletePayment(loanId, paymentId) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('Deleting payment:', paymentId, 'for loan:', loanId);
+      const response = await axios.delete(`${API_BASE_URL}/api/loans/${loanId}/payments/${paymentId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log('Delete payment response:', response.status, response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Delete payment error:', error);
+      const errorMsg = error?.response?.data?.message || error?.response?.data?.error || 'Failed to delete payment';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getLoanMetrics(userId) {
+    try {
+      console.log('getLoanMetrics called with userId:', userId);
+      
+      if (!userId) {
+        throw new Error('User ID is required');
+      }
+      
+      const token = this.getStoredToken();
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      console.log('Making request to:', `${API_BASE_URL}/api/loans/metrics/${userId}`);
+      const response = await axios.get(`${API_BASE_URL}/api/loans/metrics/${userId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log('getLoanMetrics response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Get loan metrics error:', error);
+      console.error('Error response:', error?.response?.data);
+      const errorMsg = error?.response?.data?.message || error?.response?.data?.error || error.message || 'Failed to get loan metrics';
+      throw new Error(errorMsg);
+    }
+  },
 };
+
 
 export default api;

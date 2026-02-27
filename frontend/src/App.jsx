@@ -13,6 +13,7 @@ import RiskAssessment from './components/RiskAssessment';
 import SIPCalculator from './components/SIPCalculator';
 import ForgotPassword from './components/ForgotPassword';
 import EmailVerification from './components/EmailVerification';
+import LoanManagementPage from './components/LoanManagementPage';
 
 // Wrapper component to use navigate hook
 function AppContent() {
@@ -22,6 +23,7 @@ function AppContent() {
   const [currentData, setCurrentData] = useState(null);
   const [error, setError] = useState(null);
   const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   // Check for stored token on app load
   useEffect(() => {
@@ -29,12 +31,15 @@ function AppContent() {
     if (storedToken) {
       // Set the token in API headers
       api.setAuthToken(storedToken);
-      // Get email from localStorage
+      // Get email and user ID from localStorage
       const email = localStorage.getItem('userEmail') || 'user@smartfin.com';
+      const userId = localStorage.getItem('userId');
       setUser({ 
+        id: userId ? parseInt(userId) : null,
         email: email
       });
     }
+    setAuthLoading(false);
   }, []);
 
   const handleAnalyze = async (financialData) => {
@@ -98,11 +103,45 @@ function AppContent() {
     setResult(null);
     setCurrentData(null);
     setError(null);
+    localStorage.removeItem('userId');
     navigate('/');
   };
 
   // Protected Route Component
   const ProtectedRoute = ({ children }) => {
+    // Check if user is loaded or if we have a token in localStorage
+    const hasToken = api.getStoredToken();
+    const hasUserId = localStorage.getItem('userId');
+    
+    if (authLoading) {
+      return (
+        <div className="min-h-screen bg-[#030303] flex items-center justify-center">
+          <div className="text-center">
+            <iconify-icon icon="svg-spinners:ring-resize" width="48" className="text-cyan-400 mb-4"></iconify-icon>
+            <p className="text-white/60">Loading...</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // If user state is not set but we have a token, restore it
+    if (!user && hasToken && hasUserId) {
+      const email = localStorage.getItem('userEmail') || 'user@smartfin.com';
+      const userId = localStorage.getItem('userId');
+      setUser({ 
+        id: userId ? parseInt(userId) : null,
+        email: email
+      });
+      return (
+        <div className="min-h-screen bg-[#030303] flex items-center justify-center">
+          <div className="text-center">
+            <iconify-icon icon="svg-spinners:ring-resize" width="48" className="text-cyan-400 mb-4"></iconify-icon>
+            <p className="text-white/60">Restoring session...</p>
+          </div>
+        </div>
+      );
+    }
+    
     if (!user) {
       return <Navigate to="/auth" replace />;
     }
@@ -182,6 +221,14 @@ function AppContent() {
             <ProtectedRoute>
               <ErrorBoundary fallbackMessage="Error loading SIP calculator. Please try again.">
                 <SIPCalculator />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
+
+          <Route path="/loans" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading loan management. Please try again.">
+                <LoanManagementPage />
               </ErrorBoundary>
             </ProtectedRoute>
           } />

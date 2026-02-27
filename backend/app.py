@@ -11,14 +11,66 @@ from dotenv import load_dotenv
 import joblib
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import sqlite3
 import json
 import uuid
+import logging
+
+# Configure logging - MUST be before Flask app creation
+import sys
+
+# Ensure unbuffered output
+sys.stdout = sys.__stdout__
+sys.stderr = sys.__stderr__
+
+# Create custom formatter
+log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+
+# Console handler with immediate flushing
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.DEBUG)
+console_handler.setFormatter(logging.Formatter(log_format))
+
+# File handler with immediate flushing
+file_handler = logging.FileHandler('backend.log', mode='a')
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter(log_format))
+
+# Configure root logger
+logging.basicConfig(
+    level=logging.DEBUG,
+    handlers=[console_handler, file_handler],
+    force=True
+)
+
+logger = logging.getLogger(__name__)
+
+# Ensure handlers flush immediately
+for handler in logging.root.handlers:
+    handler.flush()
+
+# Force print to console
+print("\n" + "="*80, file=sys.stdout, flush=True)
+print("SMARTFIN BACKEND LOGGING INITIALIZED", file=sys.stdout, flush=True)
+print("="*80 + "\n", file=sys.stdout, flush=True)
+sys.stdout.flush()
 
 # Load environment variables
 load_dotenv()
+
+# Custom logger class that flushes after every message
+class FlushingLogger(logging.Logger):
+    def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=None):
+        super()._log(level, msg, args, exc_info, extra, stack_info)
+        for handler in self.handlers:
+            handler.flush()
+        for handler in logging.root.handlers:
+            handler.flush()
+
+logging.setLoggerClass(FlushingLogger)
+logger = logging.getLogger(__name__)
 
 # Import validation schemas
 from validation_schemas import (
@@ -41,7 +93,46 @@ app.config['ALLOWED_EXTENSIONS'] = {'jpg', 'jpeg', 'png', 'webp'}
 
 jwt = JWTManager(app)
 
-CORS(app, origins=["https://saumye0106.github.io", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:3000"])  # Enable CORS for GitHub Pages and local dev
+CORS(app, 
+     origins=["https://saumye0106.github.io", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:3000"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization"],
+     supports_credentials=True)
+
+# Handle CORS preflight requests
+@app.before_request
+def handle_preflight():
+    # Log every request
+    msg = f"\n>>> REQUEST: {request.method} {request.path}"
+    print(msg, file=sys.stdout, flush=True)
+    sys.stdout.flush()
+    
+    msg = f"    Origin: {request.headers.get('Origin', 'N/A')}"
+    print(msg, file=sys.stdout, flush=True)
+    sys.stdout.flush()
+    
+    msg = f"    Authorization: {request.headers.get('Authorization', 'N/A')[:50]}..."
+    print(msg, file=sys.stdout, flush=True)
+    sys.stdout.flush()
+    
+    if request.method == "OPTIONS":
+        response = app.make_default_options_response()
+        headers = response.headers
+        headers["Access-Control-Allow-Origin"] = request.headers.get("Origin", "*")
+        headers["Access-Control-Allow-Headers"] = request.headers.get("Access-Control-Request-Headers", "Content-Type,Authorization")
+        headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
+        headers["Access-Control-Allow-Credentials"] = "true"
+        msg = f"    [PREFLIGHT] Returning 200 OK"
+        print(msg, file=sys.stdout, flush=True)
+        sys.stdout.flush()
+        return response
+
+@app.after_request
+def log_response(response):
+    msg = f"<<< RESPONSE: {response.status_code} {request.method} {request.path}"
+    print(msg, file=sys.stdout, flush=True)
+    sys.stdout.flush()
+    return response
 
 # Database setup
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth.db')
@@ -124,6 +215,54 @@ def init_db():
         )
     ''')
     
+    # Loans table (loan history enhancement)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS loans (
+            loan_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            loan_type TEXT NOT NULL CHECK (loan_type IN ('personal', 'home', 'auto', 'education')),
+            loan_amount REAL NOT NULL CHECK (loan_amount > 0),
+            loan_tenure INTEGER NOT NULL CHECK (loan_tenure > 0),
+            monthly_emi REAL NOT NULL CHECK (monthly_emi > 0),
+            interest_rate REAL NOT NULL CHECK (interest_rate >= 0 AND interest_rate <= 50),
+            loan_start_date TEXT NOT NULL,
+            loan_maturity_date TEXT NOT NULL,
+            default_status INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            deleted_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Loan payments table (loan history enhancement)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS loan_payments (
+            payment_id TEXT PRIMARY KEY,
+            loan_id TEXT NOT NULL,
+            payment_date TEXT NOT NULL,
+            payment_amount REAL NOT NULL CHECK (payment_amount > 0),
+            payment_status TEXT NOT NULL CHECK (payment_status IN ('on-time', 'late', 'missed')),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (loan_id) REFERENCES loans(loan_id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Loan metrics table (loan history enhancement - for caching)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS loan_metrics (
+            user_id INTEGER PRIMARY KEY,
+            loan_diversity_score REAL CHECK (loan_diversity_score >= 0 AND loan_diversity_score <= 100),
+            payment_history_score REAL CHECK (payment_history_score >= 0 AND payment_history_score <= 100),
+            loan_maturity_score REAL CHECK (loan_maturity_score >= 0 AND loan_maturity_score <= 100),
+            payment_statistics TEXT,
+            loan_statistics TEXT,
+            calculated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ''')
+    
     # Create indexes for better query performance
     cur.execute('CREATE INDEX IF NOT EXISTS idx_users_profile_user_id ON users_profile(user_id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_financial_goals_user_id ON financial_goals(user_id)')
@@ -131,6 +270,15 @@ def init_db():
     cur.execute('CREATE INDEX IF NOT EXISTS idx_financial_goals_status ON financial_goals(status)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_code ON password_reset_tokens(reset_code)')
+    
+    # Loan-related indexes
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_loans_user_id ON loans(user_id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_loans_loan_type ON loans(loan_type)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_loans_default_status ON loans(default_status)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_loans_deleted_at ON loans(deleted_at)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_payments_loan_id ON loan_payments(loan_id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_payments_payment_date ON loan_payments(payment_date)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_payments_payment_status ON loan_payments(payment_status)')
     
     db.commit()
     db.close()
@@ -185,15 +333,17 @@ def rows_to_list(rows):
 
 # ==================== LOAD ML MODEL ====================
 print("Loading ML model...")
-# Get the absolute path to the ml directory
+# Get the absolute path to the data directory for enhanced model
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ML_DIR = os.path.join(BASE_DIR, 'ml')
+DATA_DIR = os.path.join(BASE_DIR, 'data')
 
-model = joblib.load(os.path.join(ML_DIR, 'financial_health_model.pkl'))
-feature_names = joblib.load(os.path.join(ML_DIR, 'feature_names.pkl'))
-model_metadata = joblib.load(os.path.join(ML_DIR, 'model_metadata.pkl'))
-print(f"Model loaded: {model_metadata['model_type']}")
-print(f"Model R2 Score: {model_metadata['test_r2']:.4f}")
+# Load enhanced model
+model_data = joblib.load(os.path.join(DATA_DIR, 'enhanced_model.pkl'))
+model = model_data['model']
+feature_names = model_data['feature_cols']
+model_metadata = model_data['metrics']
+print(f"Model loaded: {model_data['model_type']}")
+print(f"Model R2 Score: {model_metadata['r2_test']:.4f} (95.85% - Enhanced 8-Factor Model)")
 
 # ==================== HELPER FUNCTIONS ====================
 
@@ -516,8 +666,8 @@ def home():
         'status': 'online',
         'service': 'SmartFin Financial Health API',
         'version': '1.0',
-        'model': model_metadata['model_type'],
-        'model_accuracy': f"{model_metadata['test_r2']:.2%}"
+        'model': model_data['model_type'],
+        'model_accuracy': f"{model_metadata['r2_test']:.2%}"
     })
 
 
@@ -530,23 +680,36 @@ def predict_score():
     try:
         data = request.get_json()
 
-        # Validate input
-        required_fields = ['income', 'rent', 'food', 'travel', 'shopping', 'emi', 'savings']
+        # Validate input - new enhanced model requires different fields
+        required_fields = ['income', 'emi', 'savings']
         for field in required_fields:
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
             if not isinstance(data[field], (int, float)) or data[field] < 0:
                 return jsonify({'error': f'Invalid value for {field}. Must be non-negative number.'}), 400
 
-        # Prepare features for prediction
+        # Calculate expenses from individual categories if provided
+        expenses = data.get('expenses', 0)
+        if expenses == 0 and any(k in data for k in ['rent', 'food', 'travel', 'shopping']):
+            expenses = (data.get('rent', 0) + data.get('food', 0) + 
+                       data.get('travel', 0) + data.get('shopping', 0))
+
+        # Get optional fields with defaults
+        age = data.get('age', 30)
+        has_loan = data.get('has_loan', False)
+        loan_amount = data.get('loan_amount', 0)
+        interest_rate = data.get('interest_rate', 0)
+
+        # Prepare features for enhanced model prediction
         features = pd.DataFrame([[
-            data['income'],
-            data['rent'],
-            data['food'],
-            data['travel'],
-            data['shopping'],
-            data['emi'],
-            data['savings']
+            data['income'],           # income
+            expenses,                 # expenses
+            data['savings'],          # savings
+            data['emi'],              # emi
+            age,                      # age
+            int(has_loan),            # has_loan_numeric
+            loan_amount,              # loan_amount_filled
+            interest_rate             # interest_rate_filled
         ]], columns=feature_names)
 
         # Predict score
@@ -579,9 +742,9 @@ def predict_score():
             'anomalies': anomalies,
             'investments': investments,
             'model_info': {
-                'model_type': model_metadata['model_type'],
-                'accuracy': f"{model_metadata['test_r2']:.2%}",
-                'average_error': f"±{model_metadata['mae']:.1f} points"
+                'model_type': model_data['model_type'],
+                'accuracy': f"{model_metadata['r2_test']:.2%}",
+                'average_error': f"±{model_metadata['mae_test']:.1f} points"
             }
         }
 
@@ -609,29 +772,41 @@ def what_if_simulation():
         # Modified scenario
         modified_data = data.get('modified', {})
 
+        # Helper function to calculate expenses
+        def get_expenses(scenario_data):
+            expenses = scenario_data.get('expenses', 0)
+            if expenses == 0 and any(k in scenario_data for k in ['rent', 'food', 'travel', 'shopping']):
+                expenses = (scenario_data.get('rent', 0) + scenario_data.get('food', 0) + 
+                           scenario_data.get('travel', 0) + scenario_data.get('shopping', 0))
+            return expenses
+
         # Predict current score
+        current_expenses = get_expenses(current_data)
         current_features = pd.DataFrame([[
-            current_data['income'],
-            current_data['rent'],
-            current_data['food'],
-            current_data['travel'],
-            current_data['shopping'],
-            current_data['emi'],
-            current_data['savings']
+            current_data.get('income', 0),
+            current_expenses,
+            current_data.get('savings', 0),
+            current_data.get('emi', 0),
+            current_data.get('age', 30),
+            int(current_data.get('has_loan', False)),
+            current_data.get('loan_amount', 0),
+            current_data.get('interest_rate', 0)
         ]], columns=feature_names)
 
         current_score = float(model.predict(current_features)[0])
         current_score = max(0, min(100, round(current_score, 2)))
 
         # Predict modified score
+        modified_expenses = get_expenses(modified_data)
         modified_features = pd.DataFrame([[
-            modified_data['income'],
-            modified_data['rent'],
-            modified_data['food'],
-            modified_data['travel'],
-            modified_data['shopping'],
-            modified_data['emi'],
-            modified_data['savings']
+            modified_data.get('income', 0),
+            modified_expenses,
+            modified_data.get('savings', 0),
+            modified_data.get('emi', 0),
+            modified_data.get('age', 30),
+            int(modified_data.get('has_loan', False)),
+            modified_data.get('loan_amount', 0),
+            modified_data.get('interest_rate', 0)
         ]], columns=feature_names)
 
         modified_score = float(model.predict(modified_features)[0])
@@ -663,14 +838,13 @@ def what_if_simulation():
 def model_info():
     """Get information about the ML model"""
     return jsonify({
-        'model_type': model_metadata['model_type'],
+        'model_type': model_data['model_type'],
         'features': feature_names,
         'performance': {
-            'r2_score': model_metadata['test_r2'],
-            'mae': model_metadata['mae'],
-            'rmse': model_metadata['rmse']
-        },
-        'training_samples': model_metadata['n_samples']
+            'r2_score': model_metadata['r2_test'],
+            'mae': model_metadata['mae_test'],
+            'rmse': model_metadata['rmse_test']
+        }
     })
 
 
@@ -1917,13 +2091,634 @@ def forgot_password_otp():
         return jsonify({'error': f'Failed: {str(e)}'}), 500
 
 
+# ==================== LOAN MANAGEMENT ENDPOINTS ====================
+
+from loan_history_service import LoanHistoryService, ValidationError as LoanValidationError
+from loan_metrics_engine import LoanMetricsEngine
+from loan_data_serializer import LoanDataSerializer, ParseError
+
+# Initialize loan services
+loan_service = LoanHistoryService(DB_PATH)
+loan_metrics = LoanMetricsEngine(DB_PATH)
+loan_serializer = LoanDataSerializer()
+
+
+@app.route('/api/loans', methods=['POST'])
+@jwt_required()
+def create_loan():
+    """
+    Create a new loan record
+    Requires: JWT authentication
+    Body: loan_type, loan_amount, loan_tenure, monthly_emi, interest_rate, 
+          loan_start_date, loan_maturity_date
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.get_json()
+        
+        # Log request
+        logger.info(f"Create loan request from user {user_id}")
+        
+        # Validate request body exists
+        if not data:
+            logger.warning(f"Empty request body from user {user_id}")
+            return jsonify({
+                'error': 'Request body is required',
+                'message': 'Please provide loan data in JSON format'
+            }), 400
+        
+        # Validate and create loan
+        loan = loan_service.createLoan(user_id, data)
+        
+        logger.info(f"Loan created successfully: {loan['loan_id']} for user {user_id}")
+        return jsonify({
+            'message': 'Loan created successfully',
+            'loan': loan
+        }), 201
+        
+    except LoanValidationError as e:
+        logger.warning(f"Loan validation failed for user {user_id}: {e.message}")
+        return jsonify({
+            'error': 'Validation failed',
+            'field': e.field,
+            'message': e.message,
+            'code': e.code
+        }), 400
+    except sqlite3.Error as e:
+        logger.error(f"Database error creating loan for user {user_id}: {str(e)}")
+        return jsonify({
+            'error': 'Database error',
+            'message': 'Failed to create loan. Please try again later.'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error creating loan for user {user_id}: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
+@app.route('/api/loans/user/<int:user_id>', methods=['GET'])
+@jwt_required()
+def get_user_loans(user_id):
+    """
+    Get all loans for a specific user
+    Requires: JWT authentication + ownership check
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        
+        # Check ownership - users can only access their own loans
+        if current_user_id != user_id:
+            logger.warning(f"User {current_user_id} attempted to access loans for user {user_id}")
+            return jsonify({
+                'error': 'Forbidden',
+                'message': 'Not authorized to access this user\'s loans'
+            }), 403
+        
+        # Get loans
+        loans = loan_service.getLoansByUser(user_id)
+        
+        logger.info(f"Retrieved {len(loans)} loans for user {user_id}")
+        return jsonify({
+            'loans': loans,
+            'count': len(loans)
+        }), 200
+        
+    except sqlite3.Error as e:
+        logger.error(f"Database error retrieving loans for user {user_id}: {str(e)}")
+        return jsonify({
+            'error': 'Database error',
+            'message': 'Failed to retrieve loans. Please try again later.'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving loans for user {user_id}: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
+@app.route('/api/loans/<loan_id>', methods=['GET'])
+@jwt_required()
+def get_loan(loan_id):
+    """
+    Get specific loan details with payment history
+    Requires: JWT authentication + ownership check
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        
+        # Get loan
+        loan = loan_service.getLoan(loan_id)
+        
+        if loan is None:
+            logger.warning(f"Loan not found: {loan_id}")
+            return jsonify({
+                'error': 'Not found',
+                'message': 'Loan not found'
+            }), 404
+        
+        # Check ownership
+        if loan['user_id'] != current_user_id:
+            logger.warning(f"User {current_user_id} attempted to access loan {loan_id} owned by user {loan['user_id']}")
+            return jsonify({
+                'error': 'Forbidden',
+                'message': 'Not authorized to access this loan'
+            }), 403
+        
+        # Get payment history
+        payments = loan_service.getPaymentHistory(loan_id)
+        
+        # Add payments to loan data
+        loan['payments'] = payments
+        
+        logger.info(f"Retrieved loan {loan_id} for user {current_user_id}")
+        return jsonify({
+            'loan': loan
+        }), 200
+        
+    except sqlite3.Error as e:
+        logger.error(f"Database error retrieving loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Database error',
+            'message': 'Failed to retrieve loan. Please try again later.'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
+@app.route('/api/loans/<loan_id>', methods=['PUT'])
+@jwt_required()
+def update_loan(loan_id):
+    """
+    Update loan information
+    Requires: JWT authentication + ownership check
+    Body: Fields to update (loan_type, loan_amount, etc.)
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        data = request.get_json()
+        
+        # Validate request body exists
+        if not data:
+            logger.warning(f"Empty request body for loan update: {loan_id}")
+            return jsonify({
+                'error': 'Request body is required',
+                'message': 'Please provide fields to update in JSON format'
+            }), 400
+        
+        # Update loan (includes ownership check)
+        loan = loan_service.updateLoan(loan_id, current_user_id, data)
+        
+        logger.info(f"Loan updated successfully: {loan_id} by user {current_user_id}")
+        return jsonify({
+            'message': 'Loan updated successfully',
+            'loan': loan
+        }), 200
+        
+    except ValueError as e:
+        error_msg = str(e)
+        if 'not found' in error_msg.lower():
+            logger.warning(f"Loan not found for update: {loan_id}")
+            return jsonify({
+                'error': 'Not found',
+                'message': error_msg
+            }), 404
+        elif 'does not own' in error_msg.lower():
+            logger.warning(f"User {current_user_id} attempted to update loan {loan_id} without ownership")
+            return jsonify({
+                'error': 'Forbidden',
+                'message': 'Not authorized to update this loan'
+            }), 403
+        elif 'deleted' in error_msg.lower() or 'default' in error_msg.lower():
+            logger.warning(f"Attempted to update deleted/defaulted loan: {loan_id}")
+            return jsonify({
+                'error': 'Bad request',
+                'message': error_msg
+            }), 400
+        return jsonify({
+            'error': 'Bad request',
+            'message': error_msg
+        }), 400
+    except LoanValidationError as e:
+        logger.warning(f"Loan update validation failed for {loan_id}: {e.message}")
+        return jsonify({
+            'error': 'Validation failed',
+            'field': e.field,
+            'message': e.message,
+            'code': e.code
+        }), 400
+    except sqlite3.Error as e:
+        logger.error(f"Database error updating loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Database error',
+            'message': 'Failed to update loan. Please try again later.'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error updating loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
+@app.route('/api/loans/<loan_id>', methods=['DELETE'])
+@jwt_required()
+def delete_loan(loan_id):
+    """
+    Soft delete a loan
+    Requires: JWT authentication + ownership check
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        
+        # Delete loan (includes ownership check)
+        success = loan_service.deleteLoan(loan_id, current_user_id)
+        
+        if success:
+            logger.info(f"Loan deleted successfully: {loan_id} by user {current_user_id}")
+            return jsonify({
+                'message': 'Loan deleted successfully',
+                'success': True
+            }), 200
+        else:
+            logger.warning(f"Loan not found for deletion: {loan_id}")
+            return jsonify({
+                'error': 'Not found',
+                'message': 'Loan not found'
+            }), 404
+        
+    except ValueError as e:
+        error_msg = str(e)
+        if 'does not own' in error_msg.lower():
+            logger.warning(f"User {current_user_id} attempted to delete loan {loan_id} without ownership")
+            return jsonify({
+                'error': 'Forbidden',
+                'message': 'Not authorized to delete this loan'
+            }), 403
+        return jsonify({
+            'error': 'Bad request',
+            'message': error_msg
+        }), 400
+    except sqlite3.Error as e:
+        logger.error(f"Database error deleting loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Database error',
+            'message': 'Failed to delete loan. Please try again later.'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error deleting loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
+@app.route('/api/loans/<loan_id>/payments', methods=['POST'])
+@jwt_required()
+def record_payment(loan_id):
+    """
+    Record a loan payment
+    Requires: JWT authentication + loan ownership check
+    Body: payment_date, payment_amount
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        data = request.get_json()
+        
+        logger.info(f"Recording payment - loan_id: {loan_id}, data: {data}")
+        
+        # Validate request body exists
+        if not data:
+            logger.warning(f"Empty request body for payment recording: {loan_id}")
+            return jsonify({
+                'error': 'Request body is required',
+                'message': 'Please provide payment data in JSON format'
+            }), 400
+        
+        # Check loan exists and user owns it
+        loan = loan_service.getLoan(loan_id)
+        if loan is None:
+            logger.warning(f"Loan not found for payment: {loan_id}")
+            return jsonify({
+                'error': 'Not found',
+                'message': 'Loan not found'
+            }), 404
+        
+        if loan['user_id'] != current_user_id:
+            logger.warning(f"User {current_user_id} attempted to record payment for loan {loan_id} owned by user {loan['user_id']}")
+            return jsonify({
+                'error': 'Forbidden',
+                'message': 'Not authorized to record payment for this loan'
+            }), 403
+        
+        # Record payment
+        payment = loan_service.recordPayment(loan_id, data)
+        
+        logger.info(f"Payment recorded successfully: {payment['payment_id']} for loan {loan_id}")
+        return jsonify({
+            'message': 'Payment recorded successfully',
+            'payment': payment
+        }), 201
+        
+    except LoanValidationError as e:
+        logger.warning(f"Payment validation failed for loan {loan_id}: {e.message}")
+        return jsonify({
+            'error': 'Validation failed',
+            'field': e.field,
+            'message': e.message,
+            'code': e.code
+        }), 400
+    except ValueError as e:
+        logger.error(f"Value error recording payment for loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Not found',
+            'message': str(e)
+        }), 404
+    except sqlite3.Error as e:
+        logger.error(f"Database error recording payment for loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Database error',
+            'message': 'Failed to record payment. Please try again later.'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error recording payment for loan {loan_id}: {str(e)}", exc_info=True)
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
+@app.route('/api/loans/<loan_id>/payments', methods=['GET'])
+@jwt_required()
+def get_payment_history(loan_id):
+    """
+    Get payment history for a loan
+    Requires: JWT authentication + loan ownership check
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        
+        # Check loan exists and user owns it
+        loan = loan_service.getLoan(loan_id)
+        if loan is None:
+            logger.warning(f"Loan not found for payment history: {loan_id}")
+            return jsonify({
+                'error': 'Not found',
+                'message': 'Loan not found'
+            }), 404
+        
+        if loan['user_id'] != current_user_id:
+            logger.warning(f"User {current_user_id} attempted to access payment history for loan {loan_id} owned by user {loan['user_id']}")
+            return jsonify({
+                'error': 'Forbidden',
+                'message': 'Not authorized to access payment history for this loan'
+            }), 403
+        
+        # Get payment history
+        payments = loan_service.getPaymentHistory(loan_id)
+        
+        logger.info(f"Retrieved {len(payments)} payments for loan {loan_id}")
+        return jsonify({
+            'payments': payments,
+            'count': len(payments)
+        }), 200
+        
+    except sqlite3.Error as e:
+        logger.error(f"Database error retrieving payment history for loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Database error',
+            'message': 'Failed to retrieve payment history. Please try again later.'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving payment history for loan {loan_id}: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
+@app.route('/api/loans/<loan_id>/payments/<payment_id>', methods=['DELETE'])
+@jwt_required()
+def delete_payment(loan_id, payment_id):
+    """
+    Delete a payment record
+    Requires: JWT authentication + loan ownership check
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        
+        # Check loan exists and user owns it
+        loan = loan_service.getLoan(loan_id)
+        if loan is None:
+            logger.warning(f"Loan not found for payment deletion: {loan_id}")
+            return jsonify({
+                'error': 'Not found',
+                'message': 'Loan not found'
+            }), 404
+        
+        if loan['user_id'] != current_user_id:
+            logger.warning(f"User {current_user_id} attempted to delete payment for loan {loan_id} owned by user {loan['user_id']}")
+            return jsonify({
+                'error': 'Forbidden',
+                'message': 'Not authorized to delete payment for this loan'
+            }), 403
+        
+        # Delete the payment
+        deleted = loan_service.deletePayment(payment_id, loan_id)
+        
+        if not deleted:
+            logger.warning(f"Payment not found for deletion: {payment_id}")
+            return jsonify({
+                'error': 'Not found',
+                'message': 'Payment not found'
+            }), 404
+        
+        logger.info(f"Payment deleted successfully: {payment_id} for loan {loan_id}")
+        return jsonify({
+            'message': 'Payment deleted successfully',
+            'payment_id': payment_id
+        }), 200
+        
+    except ValueError as e:
+        logger.warning(f"Validation error deleting payment {payment_id}: {str(e)}")
+        return jsonify({
+            'error': 'Validation error',
+            'message': str(e)
+        }), 400
+    except sqlite3.Error as e:
+        logger.error(f"Database error deleting payment {payment_id}: {str(e)}")
+        return jsonify({
+            'error': 'Database error',
+            'message': 'Failed to delete payment. Please try again later.'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error deleting payment {payment_id}: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
+@app.route('/api/loans/metrics/<int:user_id>', methods=['GET'])
+@jwt_required()
+def get_loan_metrics(user_id):
+    """
+    Get calculated loan metrics for a user
+    Uses cached metrics if available and recent (within 5 minutes)
+    Requires: JWT authentication + ownership check
+    Returns: loan_diversity_score, payment_history_score, loan_maturity_score,
+             payment_statistics, loan_statistics
+    """
+    try:
+        current_user_id = int(get_jwt_identity())
+        
+        # Check ownership - users can only access their own metrics
+        if current_user_id != user_id:
+            logger.warning(f"User {current_user_id} attempted to access metrics for user {user_id}")
+            return jsonify({
+                'error': 'Forbidden',
+                'message': 'Not authorized to access this user\'s metrics'
+            }), 403
+        
+        # Check if cached metrics exist and are recent (within 5 minutes)
+        db = get_db()
+        cur = db.cursor()
+        
+        cur.execute('''
+            SELECT loan_diversity_score, payment_history_score, loan_maturity_score,
+                   payment_statistics, loan_statistics, calculated_at
+            FROM loan_metrics
+            WHERE user_id = ?
+        ''', (user_id,))
+        
+        cached_row = cur.fetchone()
+        
+        if cached_row:
+            cached_data = row_to_dict(cached_row)
+            calculated_at = datetime.fromisoformat(cached_data['calculated_at'].replace('Z', '+00:00'))
+            now = datetime.now(timezone.utc)
+            
+            # If cache is less than 5 minutes old, use it
+            if (now - calculated_at).total_seconds() < 300:
+                logger.info(f"Using cached metrics for user {user_id}")
+                
+                # Parse JSON fields
+                payment_stats = json.loads(cached_data['payment_statistics']) if cached_data['payment_statistics'] else {}
+                loan_stats = json.loads(cached_data['loan_statistics']) if cached_data['loan_statistics'] else {}
+                
+                metrics = {
+                    'loan_diversity_score': cached_data['loan_diversity_score'],
+                    'payment_history_score': cached_data['payment_history_score'],
+                    'loan_maturity_score': cached_data['loan_maturity_score'],
+                    'payment_statistics': payment_stats,
+                    'loan_statistics': loan_stats,
+                    'calculated_at': cached_data['calculated_at'],
+                    'cached': True
+                }
+                
+                return jsonify({
+                    'metrics': metrics
+                }), 200
+        
+        # Cache is stale or doesn't exist, recalculate
+        logger.info(f"Recalculating metrics for user {user_id}")
+        
+        loan_diversity_score = loan_metrics.calculateLoanDiversityScore(user_id)
+        payment_history_score = loan_metrics.calculatePaymentHistoryScore(user_id)
+        loan_maturity_score = loan_metrics.calculateLoanMaturityScore(user_id)
+        
+        # Get statistics
+        payment_statistics = loan_metrics.getPaymentStatistics(user_id)
+        loan_statistics = loan_metrics.getLoanStatistics(user_id)
+        
+        # Store in cache
+        now = datetime.now(timezone.utc).isoformat()
+        payment_stats_json = json.dumps(payment_statistics)
+        loan_stats_json = json.dumps(loan_statistics)
+        
+        try:
+            cur.execute('''
+                INSERT OR REPLACE INTO loan_metrics
+                (user_id, loan_diversity_score, payment_history_score, loan_maturity_score,
+                 payment_statistics, loan_statistics, calculated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                user_id,
+                loan_diversity_score,
+                payment_history_score,
+                loan_maturity_score,
+                payment_stats_json,
+                loan_stats_json,
+                now
+            ))
+            db.commit()
+            logger.info(f"Cached metrics for user {user_id}")
+        except sqlite3.Error as e:
+            logger.warning(f"Failed to cache metrics for user {user_id}: {str(e)}")
+            # Continue anyway, just don't cache
+        
+        metrics = {
+            'loan_diversity_score': loan_diversity_score,
+            'payment_history_score': payment_history_score,
+            'loan_maturity_score': loan_maturity_score,
+            'payment_statistics': payment_statistics,
+            'loan_statistics': loan_statistics,
+            'calculated_at': now,
+            'cached': False
+        }
+        
+        logger.info(f"Retrieved loan metrics for user {user_id}")
+        return jsonify({
+            'metrics': metrics
+        }), 200
+        
+    except sqlite3.Error as e:
+        logger.error(f"Database error retrieving metrics for user {user_id}: {str(e)}")
+        return jsonify({
+            'error': 'Database error',
+            'message': 'Failed to retrieve loan metrics. Please try again later.'
+        }), 500
+    except Exception as e:
+        logger.error(f"Unexpected error retrieving metrics for user {user_id}: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred. Please try again later.'
+        }), 500
+
+
 # ==================== RUN SERVER ====================
 if __name__ == '__main__':
     print("\n" + "="*60)
     print("SmartFin Backend Server Starting...")
     print("="*60)
-    print(f"Model: {model_metadata['model_type']}")
-    print(f"Accuracy: {model_metadata['test_r2']:.2%}")
+    print(f"Model: {model_data['model_type']}")
+    print(f"Accuracy: {model_metadata['r2_test']:.2%}")
     print("="*60 + "\n")
 
-    app.run(host='0.0.0.0', port=5000)
+    # Configure all loggers to output to console
+    import logging as werkzeug_logging
+    
+    # Set root logger
+    root_logger = werkzeug_logging.getLogger()
+    root_logger.setLevel(werkzeug_logging.DEBUG)
+    
+    # Set Flask logger
+    flask_logger = werkzeug_logging.getLogger('flask')
+    flask_logger.setLevel(werkzeug_logging.DEBUG)
+    
+    # Set Werkzeug logger
+    werkzeug_log = werkzeug_logging.getLogger('werkzeug')
+    werkzeug_log.setLevel(werkzeug_logging.DEBUG)
+    
+    # Set our app logger
+    app_logger = werkzeug_logging.getLogger(__name__)
+    app_logger.setLevel(werkzeug_logging.DEBUG)
+    
+    logger.info("Starting Flask app with debug logging enabled")
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)

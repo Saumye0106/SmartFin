@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import Sidebar from './Sidebar';
 import './SIPCalculator.css';
 
 function SIPCalculator() {
@@ -92,6 +93,7 @@ function SIPCalculator() {
 
   return (
     <div className="min-h-screen bg-[#030303] text-white">
+      <Sidebar />
       {/* Background Effects */}
       <div className="fixed inset-0 z-0 pointer-events-none">
         <div className="absolute inset-0 bg-grid"></div>
@@ -129,7 +131,7 @@ function SIPCalculator() {
       </nav>
 
       {/* Main Content */}
-      <main className="relative z-10 pt-24 pb-16 px-6">
+      <main className="relative z-10 pt-24 pb-16 px-6 ml-20">
         <div className="max-w-7xl mx-auto">
           {/* Hero Section */}
           <section className="mb-12">

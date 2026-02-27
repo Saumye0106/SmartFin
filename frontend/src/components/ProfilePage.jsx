@@ -342,7 +342,7 @@ function ProfilePage() {
           </div>
 
           {/* Quick Actions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <button
               onClick={() => navigate('/goals')}
               className="glass-panel rounded-xl p-6 hover:bg-white/5 transition-all group text-left"
@@ -354,6 +354,22 @@ function ProfilePage() {
                 <div>
                   <h4 className="font-bold mb-1">Financial Goals</h4>
                   <p className="text-sm text-white/60">Manage your savings targets</p>
+                </div>
+                <iconify-icon icon="solar:arrow-right-linear" className="text-white/40 ml-auto text-xl"></iconify-icon>
+              </div>
+            </button>
+
+            <button
+              onClick={() => navigate('/loans')}
+              className="glass-panel rounded-xl p-6 hover:bg-white/5 transition-all group text-left"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-lg bg-purple-500/10 flex items-center justify-center group-hover:bg-purple-500/20 transition-colors">
+                  <iconify-icon icon="solar:wallet-money-bold-duotone" className="text-purple-400 text-2xl"></iconify-icon>
+                </div>
+                <div>
+                  <h4 className="font-bold mb-1">Loan Management</h4>
+                  <p className="text-sm text-white/60">Track your loans and payments</p>
                 </div>
                 <iconify-icon icon="solar:arrow-right-linear" className="text-white/40 ml-auto text-xl"></iconify-icon>
               </div>

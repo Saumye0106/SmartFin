@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import Sidebar from './Sidebar';
 import './GoalsManager.css';
 
 function GoalsManager() {
@@ -199,6 +200,9 @@ function GoalsManager() {
         <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-green-500/15 rounded-full blur-[100px] mix-blend-screen"></div>
       </div>
 
+      {/* Sidebar */}
+      <Sidebar />
+
       {/* Navigation Header */}
       <nav className="fixed top-0 left-0 w-full z-50 transition-all duration-300">
         <div className="absolute inset-0 bg-black/50 backdrop-blur-md border-b border-white/5"></div>
@@ -232,7 +236,7 @@ function GoalsManager() {
       </nav>
 
       {/* Main Content */}
-      <main className="relative z-10 pt-24 pb-16 px-6">
+      <main className="relative z-10 pt-24 pb-16 px-6 ml-20">
         <div className="max-w-7xl mx-auto">
           {/* Hero Section */}
           <section className="mb-12">

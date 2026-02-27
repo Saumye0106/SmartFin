@@ -79,6 +79,9 @@ const AuthPage = ({ onAuthSuccess, onBack }) => {
         if (response.token) {
           localStorage.setItem('token', response.token);
           localStorage.setItem('userEmail', formData.email);
+          if (response.user?.id) {
+            localStorage.setItem('userId', response.user.id.toString());
+          }
           onAuthSuccess(response);
         }
       } else {
@@ -88,6 +91,9 @@ const AuthPage = ({ onAuthSuccess, onBack }) => {
         if (response.token) {
           localStorage.setItem('token', response.token);
           localStorage.setItem('userEmail', formData.email);
+          if (response.user?.id) {
+            localStorage.setItem('userId', response.user.id.toString());
+          }
           
           // Redirect to email verification page
           navigate('/verify-email', {
