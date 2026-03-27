@@ -30,6 +30,24 @@ const Sidebar = () => {
       label: 'SIP Calculator',
       path: '/sip-calculator',
       color: 'orange'
+    },
+    {
+      icon: 'solar:chart-2-linear',
+      label: 'Retirement',
+      path: '/retirement',
+      color: 'green'
+    },
+    {
+      icon: 'solar:wallet-money-linear',
+      label: 'Budget Tracker',
+      path: '/budget',
+      color: 'green'
+    },
+    {
+      icon: 'solar:chat-round-dots-linear',
+      label: 'AI Assistant',
+      path: '/chat',
+      color: 'pink'
     }
   ];
 

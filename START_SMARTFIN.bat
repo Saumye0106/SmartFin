@@ -4,8 +4,8 @@ echo Starting SmartFin Application
 echo ===================================
 echo.
 
-echo Starting Backend on port 5000...
-start "SmartFin Backend" cmd /k "cd backend && ..\\.venv\\Scripts\\python.exe app.py"
+echo Starting Backend on port 5000 (Waitress WSGI)...
+start "SmartFin Backend" cmd /k "cd backend && ..\\.venv\\Scripts\\python.exe wsgi.py"
 
 timeout /t 3 /nobreak >nul
 

@@ -14,6 +14,9 @@ import SIPCalculator from './components/SIPCalculator';
 import ForgotPassword from './components/ForgotPassword';
 import EmailVerification from './components/EmailVerification';
 import LoanManagementPage from './components/LoanManagementPage';
+import RetirementPlanner from './components/RetirementPlanner';
+import ChatAgent from './components/ChatAgent';
+import BudgetManager from './components/BudgetManager';
 
 // Wrapper component to use navigate hook
 function AppContent() {
@@ -229,6 +232,30 @@ function AppContent() {
             <ProtectedRoute>
               <ErrorBoundary fallbackMessage="Error loading loan management. Please try again.">
                 <LoanManagementPage />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
+
+          <Route path="/retirement" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading retirement planner. Please try again.">
+                <RetirementPlanner />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
+
+          <Route path="/budget" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading budget manager. Please try again.">
+                <BudgetManager />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
+
+          <Route path="/chat" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading AI assistant. Please try again.">
+                <ChatAgent />
               </ErrorBoundary>
             </ProtectedRoute>
           } />

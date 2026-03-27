@@ -81,6 +81,11 @@ from validation_schemas import (
     validate_request_data
 )
 
+# Import retirement planning API
+from retirement_planning.api import retirement_bp
+from retirement_planning.migrations import RetirementPlanningMigrations
+from guidance_engine import PersonalizedGuidanceEngine
+
 app = Flask(__name__)
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'smartfin-secret-key-change-in-production')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
@@ -102,19 +107,6 @@ CORS(app,
 # Handle CORS preflight requests
 @app.before_request
 def handle_preflight():
-    # Log every request
-    msg = f"\n>>> REQUEST: {request.method} {request.path}"
-    print(msg, file=sys.stdout, flush=True)
-    sys.stdout.flush()
-    
-    msg = f"    Origin: {request.headers.get('Origin', 'N/A')}"
-    print(msg, file=sys.stdout, flush=True)
-    sys.stdout.flush()
-    
-    msg = f"    Authorization: {request.headers.get('Authorization', 'N/A')[:50]}..."
-    print(msg, file=sys.stdout, flush=True)
-    sys.stdout.flush()
-    
     if request.method == "OPTIONS":
         response = app.make_default_options_response()
         headers = response.headers
@@ -122,16 +114,11 @@ def handle_preflight():
         headers["Access-Control-Allow-Headers"] = request.headers.get("Access-Control-Request-Headers", "Content-Type,Authorization")
         headers["Access-Control-Allow-Methods"] = "GET,PUT,POST,DELETE,OPTIONS"
         headers["Access-Control-Allow-Credentials"] = "true"
-        msg = f"    [PREFLIGHT] Returning 200 OK"
-        print(msg, file=sys.stdout, flush=True)
-        sys.stdout.flush()
         return response
 
 @app.after_request
 def log_response(response):
-    msg = f"<<< RESPONSE: {response.status_code} {request.method} {request.path}"
-    print(msg, file=sys.stdout, flush=True)
-    sys.stdout.flush()
+    logger.debug(f"{request.method} {request.path} -> {response.status_code}")
     return response
 
 # Database setup
@@ -149,6 +136,13 @@ def close_connection(exception):
     db = getattr(g, '_database', None)
     if db is not None:
         db.close()
+
+# Global error handler
+@app.errorhandler(Exception)
+def handle_all_errors(error):
+    import traceback
+    logger.error(f"Unhandled exception: {str(error)}\n{traceback.format_exc()}")
+    return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
 def init_db():
     """Initialize the database with required tables"""
@@ -212,6 +206,52 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users_profile(user_id) ON DELETE CASCADE
+        )
+    ''')
+
+    # Monthly budgets table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS monthly_budgets (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            month TEXT NOT NULL,
+            monthly_income REAL NOT NULL DEFAULT 0 CHECK (monthly_income >= 0),
+            planned_savings REAL NOT NULL DEFAULT 0 CHECK (planned_savings >= 0),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            UNIQUE(user_id, month)
+        )
+    ''')
+
+    # Category-level budget allocations for each month
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS budget_categories (
+            id TEXT PRIMARY KEY,
+            budget_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            planned_amount REAL NOT NULL CHECK (planned_amount >= 0),
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (budget_id) REFERENCES monthly_budgets(id) ON DELETE CASCADE,
+            UNIQUE(budget_id, category)
+        )
+    ''')
+
+    # Expense entries table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS expense_entries (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            budget_id TEXT,
+            expense_date TEXT NOT NULL,
+            category TEXT NOT NULL,
+            amount REAL NOT NULL CHECK (amount > 0),
+            note TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (budget_id) REFERENCES monthly_budgets(id) ON DELETE SET NULL
         )
     ''')
     
@@ -279,9 +319,18 @@ def init_db():
     cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_payments_loan_id ON loan_payments(loan_id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_payments_payment_date ON loan_payments(payment_date)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_loan_payments_payment_status ON loan_payments(payment_status)')
+
+    # Budget/expense indexes
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_monthly_budgets_user_month ON monthly_budgets(user_id, month)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_budget_categories_budget_id ON budget_categories(budget_id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_expense_entries_user_date ON expense_entries(user_id, expense_date)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_expense_entries_category ON expense_entries(category)')
     
     db.commit()
     db.close()
+    
+    # Initialize retirement planning tables
+    RetirementPlanningMigrations.create_tables(DB_PATH)
 
 # Initialize database
 init_db()
@@ -330,6 +379,196 @@ def row_to_dict(row):
 def rows_to_list(rows):
     """Convert list of sqlite3.Row to list of dictionaries"""
     return [dict(row) for row in rows]
+
+
+DEFAULT_EXPENSE_CATEGORIES = {
+    'rent',
+    'food',
+    'travel',
+    'shopping',
+    'emi',
+    'utilities',
+    'healthcare',
+    'education',
+    'insurance',
+    'other'
+}
+
+
+def _current_month_string():
+    return datetime.now().strftime('%Y-%m')
+
+
+def _validate_month_string(month_str):
+    if not month_str:
+        raise ValueError('Month is required in YYYY-MM format')
+    try:
+        datetime.strptime(month_str, '%Y-%m')
+        return month_str
+    except ValueError as exc:
+        raise ValueError('Invalid month format. Use YYYY-MM') from exc
+
+
+def _month_date_range(month_str):
+    start_dt = datetime.strptime(f'{month_str}-01', '%Y-%m-%d')
+    if start_dt.month == 12:
+        end_dt = datetime(start_dt.year + 1, 1, 1)
+    else:
+        end_dt = datetime(start_dt.year, start_dt.month + 1, 1)
+    return start_dt.strftime('%Y-%m-%d'), end_dt.strftime('%Y-%m-%d')
+
+
+def _normalize_expense_category(category):
+    if not category:
+        return 'other'
+    normalized = str(category).strip().lower()
+    return normalized if normalized in DEFAULT_EXPENSE_CATEGORIES else 'other'
+
+
+def _build_budget_summary(user_id, month_str):
+    month = _validate_month_string(month_str)
+    start_date, end_date = _month_date_range(month)
+
+    budget_row = execute_query(
+        'SELECT * FROM monthly_budgets WHERE user_id = ? AND month = ?',
+        (user_id, month),
+        fetch_one=True
+    )
+    budget = row_to_dict(budget_row) if budget_row else None
+
+    planned_rows = []
+    if budget:
+        planned_rows = execute_query(
+            'SELECT category, planned_amount FROM budget_categories WHERE budget_id = ? ORDER BY category ASC',
+            (budget['id'],),
+            fetch_all=True
+        ) or []
+
+    planned_categories = {
+        row['category']: float(row['planned_amount'])
+        for row in planned_rows
+    }
+
+    expense_rows = execute_query(
+        '''
+        SELECT id, budget_id, expense_date, category, amount, note, created_at, updated_at
+        FROM expense_entries
+        WHERE user_id = ? AND expense_date >= ? AND expense_date < ?
+        ORDER BY expense_date DESC, created_at DESC
+        ''',
+        (user_id, start_date, end_date),
+        fetch_all=True
+    ) or []
+
+    category_actuals = {}
+    total_spent = 0.0
+    for row in expense_rows:
+        amount = float(row['amount'])
+        category = row['category']
+        total_spent += amount
+        category_actuals[category] = round(category_actuals.get(category, 0.0) + amount, 2)
+
+    monthly_income = float(budget['monthly_income']) if budget else 0.0
+    planned_savings = float(budget['planned_savings']) if budget else 0.0
+    auto_savings = round(max(0.0, monthly_income - total_spent), 2)
+
+    category_comparison = []
+    all_categories = sorted(set(planned_categories.keys()) | set(category_actuals.keys()))
+    for category in all_categories:
+        planned = round(float(planned_categories.get(category, 0.0)), 2)
+        actual = round(float(category_actuals.get(category, 0.0)), 2)
+        variance = round(actual - planned, 2)
+        category_comparison.append({
+            'category': category,
+            'planned': planned,
+            'actual': actual,
+            'variance': variance
+        })
+
+    return {
+        'month': month,
+        'budget': budget,
+        'monthly_income': round(monthly_income, 2),
+        'planned_savings': round(planned_savings, 2),
+        'total_spent': round(total_spent, 2),
+        'remaining_income': round(monthly_income - total_spent, 2),
+        'auto_calculated_savings': auto_savings,
+        'expense_count': len(expense_rows),
+        'planned_categories': planned_categories,
+        'category_actuals': category_actuals,
+        'category_comparison': category_comparison,
+        'expenses': rows_to_list(expense_rows)
+    }
+
+
+def _build_analysis_payload_from_summary(summary):
+    actuals = summary.get('category_actuals', {})
+    income = float(summary.get('monthly_income', 0))
+    total_spent = float(summary.get('total_spent', 0))
+
+    return {
+        'income': round(income, 2),
+        'rent': round(float(actuals.get('rent', 0)), 2),
+        'food': round(float(actuals.get('food', 0)), 2),
+        'travel': round(float(actuals.get('travel', 0)), 2),
+        'shopping': round(float(actuals.get('shopping', 0)), 2),
+        'emi': round(float(actuals.get('emi', 0)), 2),
+        'expenses': round(total_spent, 2),
+        'savings': round(max(0.0, income - total_spent), 2)
+    }
+
+
+def _run_prediction_analysis(data):
+    # Calculate expenses from individual categories if provided
+    expenses = data.get('expenses', 0)
+    if expenses == 0 and any(k in data for k in ['rent', 'food', 'travel', 'shopping']):
+        expenses = (data.get('rent', 0) + data.get('food', 0) +
+                   data.get('travel', 0) + data.get('shopping', 0))
+
+    # Get optional fields with defaults
+    age = data.get('age', 30)
+    has_loan = data.get('has_loan', False)
+    loan_amount = data.get('loan_amount', 0)
+    interest_rate = data.get('interest_rate', 0)
+
+    # Prepare features for enhanced model prediction
+    features = pd.DataFrame([[
+        data['income'],           # income
+        expenses,                 # expenses
+        data['savings'],          # savings
+        data['emi'],              # emi
+        age,                      # age
+        int(has_loan),            # has_loan_numeric
+        loan_amount,              # loan_amount_filled
+        interest_rate             # interest_rate_filled
+    ]], columns=feature_names)
+
+    # Predict score
+    predicted_score = float(model.predict(features)[0])
+    predicted_score = max(0, min(100, round(predicted_score, 2)))
+
+    # Get classification and enrichments
+    classification = classify_score(predicted_score)
+    patterns = analyze_spending_patterns(data)
+    guidance = generate_guidance(data, predicted_score, patterns)
+    anomalies = detect_anomalies(data, patterns)
+    investments = suggest_investments(predicted_score, data, patterns)
+
+    return {
+        'success': True,
+        'timestamp': datetime.now().isoformat(),
+        'score': predicted_score,
+        'classification': classification,
+        'patterns': patterns,
+        'guidance': guidance,
+        'anomalies': anomalies,
+        'investments': investments,
+        'model_info': {
+            'model_type': model_data['model_type'],
+            'accuracy': f"{model_metadata['r2_test']:.2%}",
+            'average_error': f"±{model_metadata['mae_test']:.1f} points"
+        }
+    }
 
 # ==================== LOAD ML MODEL ====================
 print("Loading ML model...")
@@ -444,6 +683,12 @@ def generate_guidance(data, score, patterns):
     """
     Generate personalized financial guidance based on score and patterns
     """
+    try:
+        return PersonalizedGuidanceEngine.generate_guidance(data, score, patterns)
+    except Exception:
+        # Keep legacy fallback behavior for resilience.
+        pass
+
     guidance = {
         'recommendations': [],
         'strengths': [],
@@ -557,6 +802,12 @@ def suggest_investments(score, data, patterns):
     """
     Rule-based investment suggestions based on score and financial profile
     """
+    try:
+        return PersonalizedGuidanceEngine.suggest_investments(score, data, patterns)
+    except Exception:
+        # Keep legacy fallback behavior for resilience.
+        pass
+
     suggestions = []
 
     savings_ratio = patterns['savings_ratio']
@@ -688,73 +939,44 @@ def predict_score():
             if not isinstance(data[field], (int, float)) or data[field] < 0:
                 return jsonify({'error': f'Invalid value for {field}. Must be non-negative number.'}), 400
 
-        # Calculate expenses from individual categories if provided
-        expenses = data.get('expenses', 0)
-        if expenses == 0 and any(k in data for k in ['rent', 'food', 'travel', 'shopping']):
-            expenses = (data.get('rent', 0) + data.get('food', 0) + 
-                       data.get('travel', 0) + data.get('shopping', 0))
-
-        # Get optional fields with defaults
-        age = data.get('age', 30)
-        has_loan = data.get('has_loan', False)
-        loan_amount = data.get('loan_amount', 0)
-        interest_rate = data.get('interest_rate', 0)
-
-        # Prepare features for enhanced model prediction
-        features = pd.DataFrame([[
-            data['income'],           # income
-            expenses,                 # expenses
-            data['savings'],          # savings
-            data['emi'],              # emi
-            age,                      # age
-            int(has_loan),            # has_loan_numeric
-            loan_amount,              # loan_amount_filled
-            interest_rate             # interest_rate_filled
-        ]], columns=feature_names)
-
-        # Predict score
-        predicted_score = float(model.predict(features)[0])
-        predicted_score = max(0, min(100, round(predicted_score, 2)))  # Clamp between 0-100
-
-        # Get classification
-        classification = classify_score(predicted_score)
-
-        # Analyze spending patterns
-        patterns = analyze_spending_patterns(data)
-
-        # Generate guidance
-        guidance = generate_guidance(data, predicted_score, patterns)
-
-        # Detect anomalies
-        anomalies = detect_anomalies(data, patterns)
-
-        # Suggest investments
-        investments = suggest_investments(predicted_score, data, patterns)
-
-        # Build response
-        response = {
-            'success': True,
-            'timestamp': datetime.now().isoformat(),
-            'score': predicted_score,
-            'classification': classification,
-            'patterns': patterns,
-            'guidance': guidance,
-            'anomalies': anomalies,
-            'investments': investments,
-            'model_info': {
-                'model_type': model_data['model_type'],
-                'accuracy': f"{model_metadata['r2_test']:.2%}",
-                'average_error': f"±{model_metadata['mae_test']:.1f} points"
-            }
-        }
-
-        return jsonify(response)
+        return jsonify(_run_prediction_analysis(data))
 
     except Exception as e:
         return jsonify({
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/predict/from-budget', methods=['POST'])
+@jwt_required()
+def predict_from_budget():
+    """Predict financial health directly from tracked budget + expenses for a month."""
+    try:
+        user_id = int(get_jwt_identity())
+        payload = request.get_json() or {}
+        month = payload.get('month', _current_month_string())
+        summary = _build_budget_summary(user_id, month)
+
+        if summary['expense_count'] == 0 and summary['monthly_income'] <= 0:
+            return jsonify({'error': 'No budget or expenses found for this month'}), 404
+
+        analysis_input = _build_analysis_payload_from_summary(summary)
+
+        # Ensure mandatory fields are present for prediction model.
+        for key in ['income', 'emi', 'savings']:
+            analysis_input.setdefault(key, 0)
+
+        response = _run_prediction_analysis(analysis_input)
+        response['source'] = 'budget_tracker'
+        response['month'] = summary['month']
+        response['analysis_input'] = analysis_input
+        return jsonify(response)
+
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/whatif', methods=['POST'])
@@ -846,6 +1068,93 @@ def model_info():
             'rmse': model_metadata['rmse_test']
         }
     })
+
+
+# ==================== CHAT AGENT ENDPOINT ====================
+
+# In-memory conversation store (per user session)
+# In production, use Redis or DB for persistence
+chat_sessions = {}
+
+@app.route('/api/chat', methods=['POST'])
+@jwt_required()
+def chat_endpoint():
+    """
+    Chat with the SmartFin AI agent.
+    Body: { message: str, session_id?: str }
+    Auth: Bearer JWT token required
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        db = get_db()
+        user = db.execute('SELECT id, username FROM users WHERE id = ?', (user_id,)).fetchone()
+        if not user:
+            return jsonify({'error': 'User not found'}), 401
+
+        user_email = user['username']
+
+        data = request.get_json()
+        user_message = data.get('message', '').strip()
+        session_id = data.get('session_id', f'user_{user_id}_default')
+
+        if not user_message:
+            return jsonify({'error': 'Message is required'}), 400
+
+        # Get or create conversation history
+        if session_id not in chat_sessions:
+            chat_sessions[session_id] = []
+
+        conversation_history = chat_sessions[session_id]
+
+        # Build app context for tool execution
+        app_context = {
+            'user_id': user_id,
+            'user_email': user_email,
+        }
+
+        # Call the chat agent
+        from chat_agent import chat as agent_chat
+        assistant_text, updated_history, widgets = agent_chat(
+            user_message, conversation_history, app_context
+        )
+
+        # Store updated history
+        chat_sessions[session_id] = updated_history
+
+        return jsonify({
+            'success': True,
+            'response': assistant_text,
+            'widgets': widgets,
+            'session_id': session_id,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': f'Chat agent error: {str(e)}'
+        }), 500
+
+
+@app.route('/api/chat/clear', methods=['POST'])
+@jwt_required()
+def clear_chat():
+    """Clear chat history for a session."""
+    try:
+        user_id = int(get_jwt_identity())
+
+        data = request.get_json() or {}
+        session_id = data.get('session_id', f'user_{user_id}_default')
+
+        if session_id in chat_sessions:
+            del chat_sessions[session_id]
+
+        return jsonify({'success': True, 'message': 'Chat history cleared'})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ==================== AUTH ENDPOINTS ====================
@@ -1720,6 +2029,332 @@ def delete_goal(goal_id):
         return jsonify({'error': error_msg}), 400
     except Exception as e:
         return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+
+
+# ==================== BUDGET TRACKER & EXPENSE MANAGEMENT ====================
+
+@app.route('/api/budget/monthly', methods=['POST'])
+@jwt_required()
+def upsert_monthly_budget():
+    """
+    Create or update the authenticated user's monthly budget.
+    Body: month (YYYY-MM), monthly_income, planned_savings (optional), category_budgets (optional dict)
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+
+        month = _validate_month_string(data.get('month', _current_month_string()))
+        monthly_income = float(data.get('monthly_income', 0))
+        planned_savings = float(data.get('planned_savings', 0))
+
+        if monthly_income < 0 or planned_savings < 0:
+            return jsonify({'error': 'monthly_income and planned_savings must be non-negative'}), 400
+
+        existing = execute_query(
+            'SELECT id FROM monthly_budgets WHERE user_id = ? AND month = ?',
+            (user_id, month),
+            fetch_one=True
+        )
+
+        now_iso = datetime.now().isoformat()
+        budget_id = existing['id'] if existing else str(uuid.uuid4())
+
+        if existing:
+            execute_query(
+                '''
+                UPDATE monthly_budgets
+                SET monthly_income = ?, planned_savings = ?, updated_at = ?
+                WHERE id = ?
+                ''',
+                (monthly_income, planned_savings, now_iso, budget_id),
+                commit=True
+            )
+        else:
+            execute_query(
+                '''
+                INSERT INTO monthly_budgets (id, user_id, month, monthly_income, planned_savings, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (budget_id, user_id, month, monthly_income, planned_savings, now_iso, now_iso),
+                commit=True
+            )
+
+        category_budgets = data.get('category_budgets', {})
+        if isinstance(category_budgets, dict):
+            execute_query(
+                'DELETE FROM budget_categories WHERE budget_id = ?',
+                (budget_id,),
+                commit=True
+            )
+            for raw_category, raw_amount in category_budgets.items():
+                category = _normalize_expense_category(raw_category)
+                amount = float(raw_amount or 0)
+                if amount < 0:
+                    return jsonify({'error': f'Category budget for {category} cannot be negative'}), 400
+                execute_query(
+                    '''
+                    INSERT INTO budget_categories (id, budget_id, category, planned_amount, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ''',
+                    (str(uuid.uuid4()), budget_id, category, amount, now_iso, now_iso),
+                    commit=True
+                )
+
+        summary = _build_budget_summary(user_id, month)
+        return jsonify({'success': True, 'summary': summary}), 200
+
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/budget/monthly', methods=['GET'])
+@jwt_required()
+def get_monthly_budget():
+    """Get budget summary for a month (defaults to current month)."""
+    try:
+        user_id = int(get_jwt_identity())
+        month = request.args.get('month', _current_month_string())
+        summary = _build_budget_summary(user_id, month)
+        return jsonify({'success': True, 'summary': summary}), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/budget/expenses', methods=['POST'])
+@jwt_required()
+def create_expense_entry():
+    """
+    Add an expense entry for the authenticated user.
+    Body: amount, category, expense_date (YYYY-MM-DD optional), note (optional)
+    """
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+
+        amount = float(data.get('amount', 0))
+        if amount <= 0:
+            return jsonify({'error': 'amount must be greater than 0'}), 400
+
+        category = _normalize_expense_category(data.get('category'))
+        note = data.get('note', '')
+
+        raw_date = data.get('expense_date', datetime.now().strftime('%Y-%m-%d'))
+        try:
+            expense_dt = datetime.strptime(raw_date, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': 'expense_date must be in YYYY-MM-DD format'}), 400
+
+        month = expense_dt.strftime('%Y-%m')
+        budget_row = execute_query(
+            'SELECT id FROM monthly_budgets WHERE user_id = ? AND month = ?',
+            (user_id, month),
+            fetch_one=True
+        )
+        budget_id = budget_row['id'] if budget_row else None
+
+        now_iso = datetime.now().isoformat()
+        expense_id = str(uuid.uuid4())
+        execute_query(
+            '''
+            INSERT INTO expense_entries (id, user_id, budget_id, expense_date, category, amount, note, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (expense_id, user_id, budget_id, expense_dt.strftime('%Y-%m-%d'), category, amount, note, now_iso, now_iso),
+            commit=True
+        )
+
+        expense = execute_query(
+            'SELECT * FROM expense_entries WHERE id = ?',
+            (expense_id,),
+            fetch_one=True
+        )
+
+        summary = _build_budget_summary(user_id, month)
+        return jsonify({'success': True, 'expense': row_to_dict(expense), 'summary': summary}), 201
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/budget/expenses', methods=['GET'])
+@jwt_required()
+def list_expense_entries():
+    """List expense entries with optional month/category filters."""
+    try:
+        user_id = int(get_jwt_identity())
+        month = request.args.get('month')
+        category = request.args.get('category')
+        limit = min(max(int(request.args.get('limit', 200)), 1), 1000)
+
+        query = '''
+            SELECT * FROM expense_entries
+            WHERE user_id = ?
+        '''
+        params = [user_id]
+
+        if month:
+            month = _validate_month_string(month)
+            start_date, end_date = _month_date_range(month)
+            query += ' AND expense_date >= ? AND expense_date < ?'
+            params.extend([start_date, end_date])
+
+        if category:
+            query += ' AND category = ?'
+            params.append(_normalize_expense_category(category))
+
+        query += ' ORDER BY expense_date DESC, created_at DESC LIMIT ?'
+        params.append(limit)
+
+        rows = execute_query(query, tuple(params), fetch_all=True) or []
+        return jsonify({'success': True, 'expenses': rows_to_list(rows), 'count': len(rows)}), 200
+
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/budget/expenses/<expense_id>', methods=['PUT'])
+@jwt_required()
+def update_expense_entry(expense_id):
+    """Update a single expense entry owned by the authenticated user."""
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+
+        existing = execute_query(
+            'SELECT * FROM expense_entries WHERE id = ? AND user_id = ?',
+            (expense_id, user_id),
+            fetch_one=True
+        )
+        if not existing:
+            return jsonify({'error': 'Expense not found'}), 404
+
+        updates = []
+        params = []
+
+        if 'amount' in data:
+            amount = float(data['amount'])
+            if amount <= 0:
+                return jsonify({'error': 'amount must be greater than 0'}), 400
+            updates.append('amount = ?')
+            params.append(amount)
+
+        if 'category' in data:
+            updates.append('category = ?')
+            params.append(_normalize_expense_category(data['category']))
+
+        if 'note' in data:
+            updates.append('note = ?')
+            params.append(str(data.get('note', '')))
+
+        if 'expense_date' in data:
+            try:
+                expense_dt = datetime.strptime(data['expense_date'], '%Y-%m-%d')
+                updates.append('expense_date = ?')
+                params.append(expense_dt.strftime('%Y-%m-%d'))
+            except ValueError:
+                return jsonify({'error': 'expense_date must be in YYYY-MM-DD format'}), 400
+
+        if not updates:
+            return jsonify({'error': 'No valid fields provided for update'}), 400
+
+        updates.append('updated_at = ?')
+        params.append(datetime.now().isoformat())
+        params.extend([expense_id, user_id])
+
+        execute_query(
+            f"UPDATE expense_entries SET {', '.join(updates)} WHERE id = ? AND user_id = ?",
+            tuple(params),
+            commit=True
+        )
+
+        updated = execute_query(
+            'SELECT * FROM expense_entries WHERE id = ?',
+            (expense_id,),
+            fetch_one=True
+        )
+
+        month = datetime.strptime(updated['expense_date'], '%Y-%m-%d').strftime('%Y-%m')
+        summary = _build_budget_summary(user_id, month)
+        return jsonify({'success': True, 'expense': row_to_dict(updated), 'summary': summary}), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/budget/expenses/<expense_id>', methods=['DELETE'])
+@jwt_required()
+def delete_expense_entry(expense_id):
+    """Delete an expense entry owned by the authenticated user."""
+    try:
+        user_id = int(get_jwt_identity())
+        existing = execute_query(
+            'SELECT * FROM expense_entries WHERE id = ? AND user_id = ?',
+            (expense_id, user_id),
+            fetch_one=True
+        )
+        if not existing:
+            return jsonify({'error': 'Expense not found'}), 404
+
+        month = datetime.strptime(existing['expense_date'], '%Y-%m-%d').strftime('%Y-%m')
+        execute_query(
+            'DELETE FROM expense_entries WHERE id = ? AND user_id = ?',
+            (expense_id, user_id),
+            commit=True
+        )
+        summary = _build_budget_summary(user_id, month)
+
+        return jsonify({'success': True, 'message': 'Expense deleted', 'summary': summary}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/budget/summary', methods=['GET'])
+@jwt_required()
+def get_budget_summary():
+    """Get monthly budget summary (totals + category comparison + expenses)."""
+    try:
+        user_id = int(get_jwt_identity())
+        month = request.args.get('month', _current_month_string())
+        summary = _build_budget_summary(user_id, month)
+        return jsonify({'success': True, 'summary': summary}), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/budget/analysis-input', methods=['GET'])
+@jwt_required()
+def get_budget_analysis_input():
+    """Return analyzer-ready payload derived from tracked budget + expenses for a month."""
+    try:
+        user_id = int(get_jwt_identity())
+        month = request.args.get('month', _current_month_string())
+        summary = _build_budget_summary(user_id, month)
+        analysis_input = _build_analysis_payload_from_summary(summary)
+
+        return jsonify({
+            'success': True,
+            'month': summary['month'],
+            'analysis_input': analysis_input,
+            'summary': {
+                'monthly_income': summary['monthly_income'],
+                'total_spent': summary['total_spent'],
+                'auto_calculated_savings': summary['auto_calculated_savings'],
+                'expense_count': summary['expense_count']
+            }
+        }), 200
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ==================== INVESTMENT CALCULATORS ====================
@@ -2692,6 +3327,10 @@ def get_loan_metrics(user_id):
         }), 500
 
 
+# ==================== REGISTER BLUEPRINTS ====================
+app.register_blueprint(retirement_bp)
+
+
 # ==================== RUN SERVER ====================
 if __name__ == '__main__':
     print("\n" + "="*60)
@@ -2721,4 +3360,12 @@ if __name__ == '__main__':
     app_logger.setLevel(werkzeug_logging.DEBUG)
     
     logger.info("Starting Flask app with debug logging enabled")
-    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    
+    # Use Waitress WSGI server (more reliable than Flask dev server for HTTP)
+    try:
+        from waitress import serve
+        logger.info("Starting with Waitress WSGI server on port 5000...")
+        serve(app, host='0.0.0.0', port=5000, threads=4)
+    except ImportError:
+        logger.warning("Waitress not installed, falling back to Flask dev server")
+        app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)

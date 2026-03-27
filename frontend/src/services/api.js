@@ -655,6 +655,240 @@ const api = {
       throw new Error(errorMsg);
     }
   },
+
+  // Retirement Planning methods
+  async calculateRetirementPlan(planData) {
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/retirement/calculate`, planData);
+      return response.data;
+    } catch (error) {
+      console.error('Calculate retirement plan error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to calculate retirement plan';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getRetirementRecommendations(planId) {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/retirement/recommendations/${planId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Get retirement recommendations error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to get recommendations';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async createRetirementScenario(scenarioData) {
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/retirement/scenarios`, scenarioData);
+      return response.data;
+    } catch (error) {
+      console.error('Create retirement scenario error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to create scenario';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getRetirementScenarios(planId) {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/retirement/scenarios/${planId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Get retirement scenarios error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to get scenarios';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getRetirementPlans(userId) {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/retirement/plans/${userId}`);
+      return response.data;
+    } catch (error) {
+      console.error('Get retirement plans error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to get plans';
+      throw new Error(errorMsg);
+    }
+  },
+
+  // Budget Tracker methods
+  async upsertMonthlyBudget(budgetData) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) throw new Error('No authentication token found');
+
+      const response = await axios.post(`${API_BASE_URL}/api/budget/monthly`, budgetData, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Upsert monthly budget error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to save monthly budget';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getMonthlyBudget(month) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) throw new Error('No authentication token found');
+
+      const response = await axios.get(`${API_BASE_URL}/api/budget/monthly`, {
+        params: month ? { month } : undefined,
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Get monthly budget error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to fetch monthly budget';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async addExpense(expenseData) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) throw new Error('No authentication token found');
+
+      const response = await axios.post(`${API_BASE_URL}/api/budget/expenses`, expenseData, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Add expense error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to add expense';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getExpenses({ month = null, category = null, limit = 200 } = {}) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) throw new Error('No authentication token found');
+
+      const params = { limit };
+      if (month) params.month = month;
+      if (category) params.category = category;
+
+      const response = await axios.get(`${API_BASE_URL}/api/budget/expenses`, {
+        params,
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Get expenses error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to fetch expenses';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async updateExpense(expenseId, updates) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) throw new Error('No authentication token found');
+
+      const response = await axios.put(`${API_BASE_URL}/api/budget/expenses/${expenseId}`, updates, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Update expense error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to update expense';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async deleteExpense(expenseId) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) throw new Error('No authentication token found');
+
+      const response = await axios.delete(`${API_BASE_URL}/api/budget/expenses/${expenseId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Delete expense error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to delete expense';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getBudgetSummary(month) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) throw new Error('No authentication token found');
+
+      const response = await axios.get(`${API_BASE_URL}/api/budget/summary`, {
+        params: month ? { month } : undefined,
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Get budget summary error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to fetch budget summary';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getBudgetAnalysisInput(month) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) throw new Error('No authentication token found');
+
+      const response = await axios.get(`${API_BASE_URL}/api/budget/analysis-input`, {
+        params: month ? { month } : undefined,
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Get budget analysis input error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to get analyzer input from budget';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async predictFromBudget(month = null) {
+    try {
+      const token = this.getStoredToken();
+      if (!token) throw new Error('No authentication token found');
+
+      const response = await axios.post(`${API_BASE_URL}/api/predict/from-budget`, month ? { month } : {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Predict from budget error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to analyze from budget data';
+      throw new Error(errorMsg);
+    }
+  },
+
+  // ==================== CHAT AGENT ====================
+  async sendChatMessage(message, sessionId = null) {
+    try {
+      const payload = { message };
+      if (sessionId) payload.session_id = sessionId;
+      const response = await axios.post(`${API_BASE_URL}/api/chat`, payload);
+      return response.data;
+    } catch (error) {
+      console.error('Chat error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to send message';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async clearChatHistory(sessionId = null) {
+    try {
+      const payload = sessionId ? { session_id: sessionId } : {};
+      const response = await axios.post(`${API_BASE_URL}/api/chat/clear`, payload);
+      return response.data;
+    } catch (error) {
+      console.error('Clear chat error:', error);
+      throw new Error('Failed to clear chat history');
+    }
+  },
 };
 
 

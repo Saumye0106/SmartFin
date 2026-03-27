@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import api from '../services/api';
 
 const FinancialForm = ({ onSubmit, loading }) => {
   const [formData, setFormData] = useState({
@@ -10,6 +11,8 @@ const FinancialForm = ({ onSubmit, loading }) => {
     emi: '',
     savings: ''
   });
+  const [loadingBudgetData, setLoadingBudgetData] = useState(false);
+  const [budgetLoadMessage, setBudgetLoadMessage] = useState('');
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -46,6 +49,35 @@ const FinancialForm = ({ onSubmit, loading }) => {
       emi: '10000',
       savings: '9000'
     });
+  };
+
+  const loadBudgetData = async () => {
+    try {
+      setLoadingBudgetData(true);
+      setBudgetLoadMessage('');
+
+      const response = await api.getBudgetAnalysisInput();
+      const input = response?.analysis_input || {};
+
+      setFormData((prev) => ({
+        ...prev,
+        income: String(input.income ?? 0),
+        rent: String(input.rent ?? 0),
+        food: String(input.food ?? 0),
+        travel: String(input.travel ?? 0),
+        shopping: String(input.shopping ?? 0),
+        emi: String(input.emi ?? 0),
+        savings: String(input.savings ?? 0)
+      }));
+
+      setBudgetLoadMessage(
+        `Loaded ${response?.summary?.expense_count ?? 0} expenses from ${response?.month || 'this month'}.`
+      );
+    } catch (error) {
+      setBudgetLoadMessage(error.message || 'Could not load budget data.');
+    } finally {
+      setLoadingBudgetData(false);
+    }
   };
 
   const fields = [
@@ -122,7 +154,21 @@ const FinancialForm = ({ onSubmit, loading }) => {
           <iconify-icon icon="solar:document-add-linear" width="18"></iconify-icon>
           Load Sample
         </button>
+
+        <button
+          type="button"
+          onClick={loadBudgetData}
+          disabled={loading || loadingBudgetData}
+          className="flex items-center justify-center gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 py-3 px-6 text-sm font-medium text-emerald-300 hover:bg-emerald-500/20 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-400/40 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <iconify-icon icon="solar:wallet-money-linear" width="18"></iconify-icon>
+          {loadingBudgetData ? 'Loading...' : 'Use Budget Data'}
+        </button>
       </div>
+
+      {budgetLoadMessage && (
+        <p className="text-xs text-white/60">{budgetLoadMessage}</p>
+      )}
     </form>
   );
 };

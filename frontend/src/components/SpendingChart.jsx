@@ -1,18 +1,32 @@
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 const SpendingChart = ({ patterns }) => {
-  if (!patterns || !patterns.breakdown) return null;
+  const breakdown = patterns?.breakdown || {};
 
-  const { breakdown } = patterns;
+  const toSafeNumber = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const normalizeRatioPercent = (value) => {
+    const n = toSafeNumber(value);
+    // Support both decimal ratios (0.42) and percentages (42)
+    return n <= 1 ? n * 100 : n;
+  };
 
   const data = [
-    { name: 'Rent', value: breakdown.rent, color: '#ef4444', icon: 'solar:home-2-linear' },
-    { name: 'Food', value: breakdown.food, color: '#f97316', icon: 'solar:cart-large-2-linear' },
-    { name: 'Travel', value: breakdown.travel, color: '#eab308', icon: 'solar:bus-linear' },
-    { name: 'Shopping', value: breakdown.shopping, color: '#8b5cf6', icon: 'solar:bag-smile-linear' },
-    { name: 'EMI', value: breakdown.emi, color: '#ec4899', icon: 'solar:card-linear' },
-    { name: 'Savings', value: breakdown.savings, color: '#10b981', icon: 'solar:safe-square-linear' }
+    { name: 'Rent', value: toSafeNumber(breakdown.rent), color: '#ef4444', icon: 'solar:home-2-linear' },
+    { name: 'Food', value: toSafeNumber(breakdown.food), color: '#f97316', icon: 'solar:cart-large-2-linear' },
+    { name: 'Travel', value: toSafeNumber(breakdown.travel), color: '#eab308', icon: 'solar:bus-linear' },
+    { name: 'Shopping', value: toSafeNumber(breakdown.shopping), color: '#8b5cf6', icon: 'solar:bag-smile-linear' },
+    { name: 'EMI', value: toSafeNumber(breakdown.emi), color: '#ec4899', icon: 'solar:card-linear' },
+    { name: 'Savings', value: toSafeNumber(breakdown.savings), color: '#10b981', icon: 'solar:safe-square-linear' }
   ].filter(item => item.value > 0);
+
+  const expenseRatioPercent = normalizeRatioPercent(patterns?.expense_ratio);
+  const savingsRatioPercent = normalizeRatioPercent(patterns?.savings_ratio);
+
+  const hasSplitData = data.length > 0;
 
   const CustomTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
@@ -37,48 +51,56 @@ const SpendingChart = ({ patterns }) => {
           <p className="text-xs text-white/50">Where your money goes each month</p>
         </div>
       </div>
-      
-      <ResponsiveContainer width="100%" height={280}>
-        <PieChart>
-          <Pie
-            data={data}
-            cx="50%"
-            cy="50%"
-            labelLine={false}
-            outerRadius={100}
-            fill="#8884d8"
-            dataKey="value"
-            strokeWidth={2}
-            stroke="rgba(0,0,0,0.5)"
-          >
-            {data.map((entry, index) => (
-              <Cell key={`cell-${index}`} fill={entry.color} />
-            ))}
-          </Pie>
-          <Tooltip content={<CustomTooltip />} />
-        </PieChart>
-      </ResponsiveContainer>
 
-      <div className="grid grid-cols-2 gap-3 mt-6">
-        {data.map((item, index) => (
-          <div key={index} className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/5">
-            <iconify-icon icon={item.icon} style={{ color: item.color }} width="18"></iconify-icon>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs text-white/60">{item.name}</div>
-              <div className="text-sm font-semibold text-white">{item.value.toFixed(1)}%</div>
-            </div>
+      {hasSplitData ? (
+        <>
+          <ResponsiveContainer width="100%" height={280}>
+            <PieChart>
+              <Pie
+                data={data}
+                cx="50%"
+                cy="50%"
+                labelLine={false}
+                outerRadius={100}
+                fill="#8884d8"
+                dataKey="value"
+                strokeWidth={2}
+                stroke="rgba(0,0,0,0.5)"
+              >
+                {data.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip content={<CustomTooltip />} />
+            </PieChart>
+          </ResponsiveContainer>
+
+          <div className="grid grid-cols-2 gap-3 mt-6">
+            {data.map((item, index) => (
+              <div key={index} className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/5">
+                <iconify-icon icon={item.icon} style={{ color: item.color }} width="18"></iconify-icon>
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-white/60">{item.name}</div>
+                  <div className="text-sm font-semibold text-white">{item.value.toFixed(1)}%</div>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      ) : (
+        <div className="rounded-lg border border-white/10 bg-white/5 p-4 text-sm text-white/60">
+          Expenditure split is unavailable for this input. Try entering non-zero income and expense values.
+        </div>
+      )}
 
       <div className="mt-6 pt-6 border-t border-white/10 space-y-3">
         <div className="flex items-center justify-between text-sm">
           <span className="text-white/60">Total Expenses</span>
-          <span className="font-semibold text-white">{(patterns.expense_ratio * 100).toFixed(1)}% of income</span>
+          <span className="font-semibold text-white">{expenseRatioPercent.toFixed(1)}% of income</span>
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-white/60">Savings Rate</span>
-          <span className="font-semibold text-green-400">{(patterns.savings_ratio * 100).toFixed(1)}% of income</span>
+          <span className="font-semibold text-green-400">{savingsRatioPercent.toFixed(1)}% of income</span>
         </div>
       </div>
     </div>

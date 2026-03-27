@@ -192,7 +192,7 @@ function GoalsManager() {
   };
 
   return (
-    <div className="min-h-screen bg-[#030303] text-white">
+    <div className="min-h-screen bg-[#030303] text-white flex flex-col">
       {/* Background Effects */}
       <div className="fixed inset-0 z-0 pointer-events-none">
         <div className="absolute inset-0 bg-grid"></div>
@@ -200,11 +200,198 @@ function GoalsManager() {
         <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-green-500/15 rounded-full blur-[100px] mix-blend-screen"></div>
       </div>
 
+      {/* Modal - Rendered at top level to avoid parent overflow constraints */}
+      {showCreateForm && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6 bg-black/70 backdrop-blur-sm animate-fade-in">
+          <div className="glass-panel rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-fade-in-up">
+            {/* Form Header */}
+            <div className="sticky top-0 bg-[#0a0a0a]/95 backdrop-blur-md border-b border-white/10 p-6 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                  <iconify-icon icon="solar:target-linear" className="text-emerald-400 text-xl"></iconify-icon>
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">{editingGoal ? 'Edit Goal' : 'Create New Goal'}</h2>
+                  <p className="text-xs text-white/50">Define your financial objective</p>
+                </div>
+              </div>
+              <button 
+                onClick={handleCancel} 
+                className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-all"
+              >
+                <iconify-icon icon="solar:close-circle-linear" className="text-white/60 text-xl"></iconify-icon>
+              </button>
+            </div>
+
+            {/* Form Content */}
+            <form onSubmit={handleSubmit} className="p-6 space-y-6">
+              {errors.submit && (
+                <div className="p-4 rounded-lg bg-danger-950/30 border border-danger-500/30 flex items-start gap-3">
+                  <iconify-icon icon="solar:danger-triangle-linear" className="text-danger-400 mt-0.5 shrink-0"></iconify-icon>
+                  <div className="text-sm text-danger-400">{errors.submit}</div>
+                </div>
+              )}
+
+              {/* Goal Type */}
+              <div className="space-y-2 group">
+                <label htmlFor="goal_type" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
+                  Goal Type
+                </label>
+                <select
+                  id="goal_type"
+                  name="goal_type"
+                  value={formData.goal_type}
+                  onChange={handleChange}
+                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
+                >
+                  <option value="short-term">Short-term (&lt; 3 years)</option>
+                  <option value="long-term">Long-term (&gt; 3 years)</option>
+                </select>
+              </div>
+
+              {/* Target Amount & Date */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2 group">
+                  <label htmlFor="target_amount" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
+                    Target Amount
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      id="target_amount"
+                      name="target_amount"
+                      value={formData.target_amount}
+                      onChange={handleChange}
+                      className={`w-full bg-[#0a0a0a] border ${errors.target_amount ? 'border-danger-500/50' : 'border-white/10'} rounded-lg px-4 py-2.5 pl-10 text-sm text-white placeholder-white/20 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all`}
+                      placeholder="50000"
+                      step="0.01"
+                      min="0.01"
+                    />
+                    <iconify-icon icon="solar:dollar-linear" className="absolute left-3.5 top-3 text-white/30 group-focus-within:text-emerald-400 transition-colors text-lg"></iconify-icon>
+                  </div>
+                  {errors.target_amount && (
+                    <p className="text-[11px] text-danger-400 font-medium pl-1">{errors.target_amount}</p>
+                  )}
+                </div>
+
+                <div className="space-y-2 group">
+                  <label htmlFor="target_date" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
+                    Target Date
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      id="target_date"
+                      name="target_date"
+                      value={formData.target_date}
+                      onChange={handleChange}
+                      className={`w-full bg-[#0a0a0a] border ${errors.target_date ? 'border-danger-500/50' : 'border-white/10'} rounded-lg px-4 py-2.5 pl-10 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all`}
+                    />
+                    <iconify-icon icon="solar:calendar-linear" className="absolute left-3.5 top-3 text-white/30 group-focus-within:text-emerald-400 transition-colors text-lg"></iconify-icon>
+                  </div>
+                  {errors.target_date && (
+                    <p className="text-[11px] text-danger-400 font-medium pl-1">{errors.target_date}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Priority */}
+              <div className="space-y-2 group">
+                <label htmlFor="priority" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
+                  Priority
+                </label>
+                <select
+                  id="priority"
+                  name="priority"
+                  value={formData.priority}
+                  onChange={handleChange}
+                  className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              {/* Status (Edit Only) */}
+              {editingGoal && (
+                <div className="space-y-2 group">
+                  <label htmlFor="status" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
+                    Status
+                  </label>
+                  <select
+                    id="status"
+                    name="status"
+                    value={formData.status}
+                    onChange={handleChange}
+                    className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
+                  >
+                    <option value="active">Active</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Description */}
+              <div className="space-y-2 group">
+                <label htmlFor="description" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
+                  Description (Optional)
+                </label>
+                <textarea
+                  id="description"
+                  name="description"
+                  value={formData.description}
+                  onChange={handleChange}
+                  className={`w-full bg-[#0a0a0a] border ${errors.description ? 'border-danger-500/50' : 'border-white/10'} rounded-lg px-4 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all resize-none`}
+                  placeholder="Describe your goal..."
+                  rows="3"
+                  maxLength="500"
+                />
+                {errors.description && (
+                  <p className="text-[11px] text-danger-400 font-medium pl-1">{errors.description}</p>
+                )}
+                <p className="text-[11px] text-white/30 pl-1">{formData.description.length}/500 characters</p>
+              </div>
+
+              {/* Form Actions */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={handleCancel}
+                  disabled={submitting}
+                  className="flex-1 px-6 py-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 transition-all text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 px-6 py-3 rounded-lg bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 border border-emerald-400/20 transition-all text-sm font-semibold shadow-lg shadow-emerald-900/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {submitting ? (
+                    <>
+                      <iconify-icon icon="solar:spinner-solid" className="animate-spin text-lg"></iconify-icon>
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <iconify-icon icon="solar:check-circle-linear" width="18"></iconify-icon>
+                      {editingGoal ? 'Update Goal' : 'Create Goal'}
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       <Sidebar />
 
       {/* Navigation Header */}
-      <nav className="fixed top-0 left-0 w-full z-50 transition-all duration-300">
+      <nav className="fixed top-0 left-0 w-full z-40 transition-all duration-300">
         <div className="absolute inset-0 bg-black/50 backdrop-blur-md border-b border-white/5"></div>
         <div className="max-w-7xl mx-auto px-6 h-16 relative flex items-center justify-between">
           {/* Logo */}
@@ -236,7 +423,7 @@ function GoalsManager() {
       </nav>
 
       {/* Main Content */}
-      <main className="relative z-10 pt-24 pb-16 px-6 ml-20">
+      <main className="relative z-10 pt-24 px-6 ml-20 flex-1">
         <div className="max-w-7xl mx-auto">
           {/* Hero Section */}
           <section className="mb-12">
@@ -272,193 +459,6 @@ function GoalsManager() {
               </div>
               <h3 className="text-xl font-bold text-white mb-2">Loading Goals</h3>
               <p className="text-white/50 text-sm">Fetching your financial objectives...</p>
-            </div>
-          )}
-
-          {/* Create/Edit Form Modal */}
-          {showCreateForm && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/70 backdrop-blur-sm animate-fade-in">
-              <div className="glass-panel rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-fade-in-up">
-                {/* Form Header */}
-                <div className="sticky top-0 bg-[#0a0a0a]/95 backdrop-blur-md border-b border-white/10 p-6 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                      <iconify-icon icon="solar:target-linear" className="text-emerald-400 text-xl"></iconify-icon>
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-bold text-white">{editingGoal ? 'Edit Goal' : 'Create New Goal'}</h2>
-                      <p className="text-xs text-white/50">Define your financial objective</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={handleCancel} 
-                    className="w-8 h-8 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center transition-all"
-                  >
-                    <iconify-icon icon="solar:close-circle-linear" className="text-white/60 text-xl"></iconify-icon>
-                  </button>
-                </div>
-
-                {/* Form Content */}
-                <form onSubmit={handleSubmit} className="p-6 space-y-6">
-                  {errors.submit && (
-                    <div className="p-4 rounded-lg bg-danger-950/30 border border-danger-500/30 flex items-start gap-3">
-                      <iconify-icon icon="solar:danger-triangle-linear" className="text-danger-400 mt-0.5 shrink-0"></iconify-icon>
-                      <div className="text-sm text-danger-400">{errors.submit}</div>
-                    </div>
-                  )}
-
-                  {/* Goal Type */}
-                  <div className="space-y-2 group">
-                    <label htmlFor="goal_type" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
-                      Goal Type
-                    </label>
-                    <select
-                      id="goal_type"
-                      name="goal_type"
-                      value={formData.goal_type}
-                      onChange={handleChange}
-                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
-                    >
-                      <option value="short-term">Short-term (&lt; 3 years)</option>
-                      <option value="long-term">Long-term (&gt; 3 years)</option>
-                    </select>
-                  </div>
-
-                  {/* Target Amount & Date */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2 group">
-                      <label htmlFor="target_amount" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
-                        Target Amount
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="number"
-                          id="target_amount"
-                          name="target_amount"
-                          value={formData.target_amount}
-                          onChange={handleChange}
-                          className={`w-full bg-[#0a0a0a] border ${errors.target_amount ? 'border-danger-500/50' : 'border-white/10'} rounded-lg px-4 py-2.5 pl-10 text-sm text-white placeholder-white/20 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all`}
-                          placeholder="50000"
-                          step="0.01"
-                          min="0.01"
-                        />
-                        <iconify-icon icon="solar:dollar-linear" className="absolute left-3.5 top-3 text-white/30 group-focus-within:text-emerald-400 transition-colors text-lg"></iconify-icon>
-                      </div>
-                      {errors.target_amount && (
-                        <p className="text-[11px] text-danger-400 font-medium pl-1">{errors.target_amount}</p>
-                      )}
-                    </div>
-
-                    <div className="space-y-2 group">
-                      <label htmlFor="target_date" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
-                        Target Date
-                      </label>
-                      <div className="relative">
-                        <input
-                          type="date"
-                          id="target_date"
-                          name="target_date"
-                          value={formData.target_date}
-                          onChange={handleChange}
-                          className={`w-full bg-[#0a0a0a] border ${errors.target_date ? 'border-danger-500/50' : 'border-white/10'} rounded-lg px-4 py-2.5 pl-10 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all`}
-                        />
-                        <iconify-icon icon="solar:calendar-linear" className="absolute left-3.5 top-3 text-white/30 group-focus-within:text-emerald-400 transition-colors text-lg"></iconify-icon>
-                      </div>
-                      {errors.target_date && (
-                        <p className="text-[11px] text-danger-400 font-medium pl-1">{errors.target_date}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Priority */}
-                  <div className="space-y-2 group">
-                    <label htmlFor="priority" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
-                      Priority
-                    </label>
-                    <select
-                      id="priority"
-                      name="priority"
-                      value={formData.priority}
-                      onChange={handleChange}
-                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
-                    >
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
-                    </select>
-                  </div>
-
-                  {/* Status (Edit Only) */}
-                  {editingGoal && (
-                    <div className="space-y-2 group">
-                      <label htmlFor="status" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
-                        Status
-                      </label>
-                      <select
-                        id="status"
-                        name="status"
-                        value={formData.status}
-                        onChange={handleChange}
-                        className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all"
-                      >
-                        <option value="active">Active</option>
-                        <option value="completed">Completed</option>
-                        <option value="cancelled">Cancelled</option>
-                      </select>
-                    </div>
-                  )}
-
-                  {/* Description */}
-                  <div className="space-y-2 group">
-                    <label htmlFor="description" className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-emerald-400">
-                      Description (Optional)
-                    </label>
-                    <textarea
-                      id="description"
-                      name="description"
-                      value={formData.description}
-                      onChange={handleChange}
-                      className={`w-full bg-[#0a0a0a] border ${errors.description ? 'border-danger-500/50' : 'border-white/10'} rounded-lg px-4 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all resize-none`}
-                      placeholder="Describe your goal..."
-                      rows="3"
-                      maxLength="500"
-                    />
-                    {errors.description && (
-                      <p className="text-[11px] text-danger-400 font-medium pl-1">{errors.description}</p>
-                    )}
-                    <p className="text-[11px] text-white/30 pl-1">{formData.description.length}/500 characters</p>
-                  </div>
-
-                  {/* Form Actions */}
-                  <div className="flex gap-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={handleCancel}
-                      disabled={submitting}
-                      className="flex-1 px-6 py-3 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 transition-all text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="flex-1 px-6 py-3 rounded-lg bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 border border-emerald-400/20 transition-all text-sm font-semibold shadow-lg shadow-emerald-900/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                    >
-                      {submitting ? (
-                        <>
-                          <iconify-icon icon="solar:spinner-solid" className="animate-spin text-lg"></iconify-icon>
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <iconify-icon icon="solar:check-circle-linear" width="18"></iconify-icon>
-                          {editingGoal ? 'Update Goal' : 'Create Goal'}
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
             </div>
           )}
 
@@ -558,7 +558,7 @@ function GoalsManager() {
       </main>
 
       {/* Footer */}
-      <footer className="relative z-20 border-t border-white/10 bg-black/50 backdrop-blur-md py-8 px-6">
+      <footer className="relative z-10 border-t border-white/10 bg-black/50 backdrop-blur-md py-8 px-6">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-4">

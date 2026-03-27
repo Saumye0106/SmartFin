@@ -75,24 +75,67 @@ const Features = () => {
                 <iconify-icon icon="solar:arrow-right-linear"></iconify-icon>
               </a>
             </div>
-            <div className="flex-1 w-full max-w-md bg-[#050505] rounded-lg border border-white/10 p-4 font-mono text-xs shadow-2xl relative">
-              <div className="flex gap-1.5 mb-4">
-                <div className="w-2.5 h-2.5 rounded-full bg-red-500/20"></div>
-                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/20"></div>
-                <div className="w-2.5 h-2.5 rounded-full bg-green-500/20"></div>
+            <div className="flex-1 w-full max-w-md bg-[#050505] rounded-xl border border-white/10 p-5 shadow-2xl relative">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <div className="text-xs text-white/40 uppercase tracking-wider mb-1">Financial Health</div>
+                  <div className="text-2xl font-bold text-white">Score: <span className="text-pink-400">78</span><span className="text-xs text-white/30 ml-1">/100</span></div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-green-400 flex items-center gap-1 justify-end">
+                    <svg width="10" height="10" viewBox="0 0 10 10"><path d="M5 1L9 6H1L5 1Z" fill="currentColor"/></svg>
+                    +4.2 pts
+                  </div>
+                  <div className="text-xs text-white/30">vs last month</div>
+                </div>
               </div>
-              <div className="text-blue-400">import</div> <div className="text-white inline">{'{ SmartFin }'}</div> <div className="text-blue-400 inline">from</div> <div className="text-green-400 inline">'@smartfin/sdk'</div>;
-              <br /><br />
-              <div className="text-purple-400">const</div> <div className="text-white inline">analyzer</div> = <div className="text-purple-400 inline">new</div> <div className="text-yellow-400 inline">SmartFin</div>{'({'}
-              <div className="pl-4 text-white">apiKey: <span className="text-green-400">'sf_live_...'</span>,</div>
-              <div className="pl-4 text-white">features: [<span className="text-green-400">'predict'</span>, <span className="text-green-400">'analyze'</span>]</div>
-              {'});'}
-              <br /><br />
-              <div className="text-gray-500">// Get insights</div>
-              <div className="text-purple-400">await</div> <div className="text-white inline">analyzer</div>.<div className="text-yellow-400 inline">analyze</div>{'({'}
-              <div className="pl-4 text-white">period: <span className="text-green-400">'monthly'</span>,</div>
-              <div className="pl-4 text-white">metrics: [<span className="text-green-400">'spending'</span>, <span className="text-green-400">'savings'</span>]</div>
-              {'});'}
+
+              {/* Mini bar chart – monthly score trend */}
+              <div className="flex items-end gap-1.5 h-20 mb-4">
+                {[62, 58, 65, 60, 68, 72, 70, 74, 71, 76, 74, 78].map((val, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <div
+                      className={`w-full rounded-sm transition-all ${i === 11 ? 'bg-pink-400' : 'bg-white/15 hover:bg-white/25'}`}
+                      style={{ height: `${(val / 100) * 100}%` }}
+                    ></div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between text-[10px] text-white/25 mb-5">
+                <span>Jan</span><span>Mar</span><span>Jun</span><span>Sep</span><span>Dec</span>
+              </div>
+
+              {/* Prediction insights */}
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-3 bg-white/5 rounded-lg px-3 py-2">
+                  <div className="w-7 h-7 rounded-md bg-green-500/15 flex items-center justify-center flex-shrink-0">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 9L5.5 5.5L8 8L12 3" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-white/70">Savings trend</div>
+                    <div className="text-[10px] text-green-400">&#8593; 12% above avg</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 bg-white/5 rounded-lg px-3 py-2">
+                  <div className="w-7 h-7 rounded-md bg-yellow-500/15 flex items-center justify-center flex-shrink-0">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 3V8M7 10.5V11" stroke="#eab308" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-white/70">Spending alert</div>
+                    <div className="text-[10px] text-yellow-400">EMI ratio nearing 30%</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 bg-white/5 rounded-lg px-3 py-2">
+                  <div className="w-7 h-7 rounded-md bg-pink-500/15 flex items-center justify-center flex-shrink-0">
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 11L5 5L8 7L12 2" stroke="#ec4899" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><circle cx="12" cy="2" r="1.5" fill="#ec4899" opacity="0.4"/></svg>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-white/70">Predicted score</div>
+                    <div className="text-[10px] text-pink-400">82 by next quarter</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>

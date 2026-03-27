@@ -57,6 +57,9 @@ nul
 # Environment variables
 .env
 .env.local
+*.api-key.csv
+*api-key*
+bedrock-long-term-api-key.csv
 
 # Local SQLite DBs for services
 services/**/auth.db
