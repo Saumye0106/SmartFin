@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
+import SmartFinFooter from './SmartFinFooter';
 import api from '../services/api';
 
 const CATEGORY_OPTIONS = [
@@ -58,6 +59,10 @@ function BudgetManager() {
     note: ''
   });
 
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [sortBy, setSortBy] = useState('date-desc');
+  const [groupBy, setGroupBy] = useState(null);
+
   const guidanceList = useMemo(() => {
     if (!analysisResult?.guidance) return [];
     if (Array.isArray(analysisResult.guidance)) return analysisResult.guidance;
@@ -76,6 +81,59 @@ function BudgetManager() {
       .filter((row) => Number(row.actual || 0) > 0 || Number(row.planned || 0) > 0)
       .sort((a, b) => Number(b.actual || 0) - Number(a.actual || 0));
   }, [summary]);
+
+  const filteredExpenses = useMemo(() => {
+    if (!selectedCategory) return expenses;
+    return expenses.filter((expense) => expense.category === selectedCategory);
+  }, [expenses, selectedCategory]);
+
+  const sortedAndGroupedExpenses = useMemo(() => {
+    let sorted = [...filteredExpenses];
+
+    // Apply sorting
+    switch (sortBy) {
+      case 'date-asc':
+        sorted.sort((a, b) => new Date(a.expense_date) - new Date(b.expense_date));
+        break;
+      case 'date-desc':
+        sorted.sort((a, b) => new Date(b.expense_date) - new Date(a.expense_date));
+        break;
+      case 'amount-asc':
+        sorted.sort((a, b) => Number(a.amount) - Number(b.amount));
+        break;
+      case 'amount-desc':
+        sorted.sort((a, b) => Number(b.amount) - Number(a.amount));
+        break;
+      case 'category-asc':
+        sorted.sort((a, b) => a.category.localeCompare(b.category));
+        break;
+      default:
+        break;
+    }
+
+    // Apply grouping
+    if (!groupBy) {
+      return { ungrouped: sorted };
+    }
+
+    const grouped = {};
+    sorted.forEach((expense) => {
+      let key;
+      if (groupBy === 'category') {
+        key = expense.category;
+      } else if (groupBy === 'month') {
+        key = expense.expense_date.slice(0, 7);
+      } else {
+        key = expense.expense_date;
+      }
+      if (!grouped[key]) {
+        grouped[key] = [];
+      }
+      grouped[key].push(expense);
+    });
+
+    return grouped;
+  }, [filteredExpenses, sortBy, groupBy]);
 
   const fetchMonthData = async (selectedMonth) => {
     try {
@@ -222,6 +280,86 @@ function BudgetManager() {
     }
   };
 
+  const renderExpenseRow = (expense) => (
+    <tr key={expense.id} className="border-b border-white/5">
+      {editingExpenseId === expense.id ? (
+        <>
+          <td className="py-2">
+            <input
+              type="date"
+              value={editExpenseForm.expense_date}
+              onChange={(e) => setEditExpenseForm((prev) => ({ ...prev, expense_date: e.target.value }))}
+              className="w-full bg-black/40 border border-white/20 rounded px-2 py-1 text-xs"
+            />
+          </td>
+          <td className="py-2">
+            <select
+              value={editExpenseForm.category}
+              onChange={(e) => setEditExpenseForm((prev) => ({ ...prev, category: e.target.value }))}
+              className="w-full bg-black/40 border border-white/20 rounded px-2 py-1 text-xs capitalize"
+            >
+              {CATEGORY_OPTIONS.map((category) => (
+                <option key={category} value={category}>{category}</option>
+              ))}
+            </select>
+          </td>
+          <td className="py-2">
+            <input
+              type="number"
+              min="1"
+              value={editExpenseForm.amount}
+              onChange={(e) => setEditExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
+              className="w-full bg-black/40 border border-white/20 rounded px-2 py-1 text-xs"
+            />
+          </td>
+          <td className="py-2">
+            <input
+              type="text"
+              value={editExpenseForm.note}
+              onChange={(e) => setEditExpenseForm((prev) => ({ ...prev, note: e.target.value }))}
+              className="w-full bg-black/40 border border-white/20 rounded px-2 py-1 text-xs"
+            />
+          </td>
+          <td className="py-2 text-right space-x-2">
+            <button
+              onClick={() => handleSaveExpenseEdit(expense.id)}
+              className="text-xs text-emerald-300 hover:text-emerald-200"
+            >
+              Save
+            </button>
+            <button
+              onClick={handleCancelEditExpense}
+              className="text-xs text-white/70 hover:text-white"
+            >
+              Cancel
+            </button>
+          </td>
+        </>
+      ) : (
+        <>
+          <td className="py-2 text-white/80">{expense.expense_date}</td>
+          <td className="py-2 capitalize text-white/80">{expense.category}</td>
+          <td className="py-2 text-white/90">{formatINR(expense.amount)}</td>
+          <td className="py-2 text-white/60">{expense.note || '-'}</td>
+          <td className="py-2 text-right space-x-2">
+            <button
+              onClick={() => handleStartEditExpense(expense)}
+              className="text-xs text-amber-300 hover:text-amber-200"
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => handleDeleteExpense(expense.id)}
+              className="text-xs text-red-300 hover:text-red-200"
+            >
+              Delete
+            </button>
+          </td>
+        </>
+      )}
+    </tr>
+  );
+
   return (
     <div className="min-h-screen bg-[#030303] text-white">
       <div className="fixed inset-0 z-0 pointer-events-none">
@@ -258,12 +396,16 @@ function BudgetManager() {
 
       <div className="relative z-10 pt-24 pb-12 px-6 ml-20">
         <div className="max-w-7xl mx-auto space-y-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
             <div>
-              <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-emerald-400 to-orange-300 bg-clip-text text-transparent">
-                Budget Tracker and Expense Manager
+              <div className="flex items-center gap-2 mb-4">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="text-xs text-white/50 font-medium tracking-widest uppercase">Budget and Expense Control</span>
+              </div>
+              <h1 className="font-display text-4xl md:text-5xl font-bold text-white mb-3 tracking-tight">
+                Budget Tracker <span className="bg-gradient-to-r from-emerald-400 to-orange-300 bg-clip-text text-transparent">and Expense Manager</span>
               </h1>
-              <p className="text-white/60">Track monthly budgets, log expenses, and run analysis from real spending data.</p>
+              <p className="text-white/50 max-w-2xl">Track monthly budgets, log expenses, and run analysis from real spending data.</p>
             </div>
             <div className="flex items-center gap-3">
               <label className="text-xs text-white/60">Month</label>
@@ -446,8 +588,17 @@ function BudgetManager() {
                     const ratio = planned > 0 ? (actual / planned) * 100 : 100;
                     const variance = Number(row.variance || actual - planned);
                     const isOver = variance > 0;
+                    const isSelected = selectedCategory === row.category;
                     return (
-                      <div key={row.category} className="rounded-lg border border-white/10 bg-black/30 p-3">
+                      <div 
+                        key={row.category} 
+                        onClick={() => setSelectedCategory(isSelected ? null : row.category)}
+                        className={`rounded-lg border p-3 cursor-pointer transition-all duration-200 ${
+                          isSelected
+                            ? 'border-emerald-400 bg-emerald-500/20'
+                            : 'border-white/10 bg-black/30 hover:border-white/20 hover:bg-black/25'
+                        }`}
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <p className="text-xs capitalize text-white/75">{row.category}</p>
                           <p className={`text-xs font-semibold ${isOver ? 'text-red-300' : 'text-emerald-300'}`}>
@@ -476,99 +627,104 @@ function BudgetManager() {
             ) : expenses.length === 0 ? (
               <p className="text-white/60 text-sm">No expenses recorded for this month.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-white/50 border-b border-white/10">
-                      <th className="py-2">Date</th>
-                      <th className="py-2">Category</th>
-                      <th className="py-2">Amount</th>
-                      <th className="py-2">Note</th>
-                      <th className="py-2 text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {expenses.map((expense) => (
-                      <tr key={expense.id} className="border-b border-white/5">
-                        {editingExpenseId === expense.id ? (
-                          <>
-                            <td className="py-2">
-                              <input
-                                type="date"
-                                value={editExpenseForm.expense_date}
-                                onChange={(e) => setEditExpenseForm((prev) => ({ ...prev, expense_date: e.target.value }))}
-                                className="w-full bg-black/40 border border-white/20 rounded px-2 py-1 text-xs"
-                              />
-                            </td>
-                            <td className="py-2">
-                              <select
-                                value={editExpenseForm.category}
-                                onChange={(e) => setEditExpenseForm((prev) => ({ ...prev, category: e.target.value }))}
-                                className="w-full bg-black/40 border border-white/20 rounded px-2 py-1 text-xs capitalize"
-                              >
-                                {CATEGORY_OPTIONS.map((category) => (
-                                  <option key={category} value={category}>{category}</option>
-                                ))}
-                              </select>
-                            </td>
-                            <td className="py-2">
-                              <input
-                                type="number"
-                                min="1"
-                                value={editExpenseForm.amount}
-                                onChange={(e) => setEditExpenseForm((prev) => ({ ...prev, amount: e.target.value }))}
-                                className="w-full bg-black/40 border border-white/20 rounded px-2 py-1 text-xs"
-                              />
-                            </td>
-                            <td className="py-2">
-                              <input
-                                type="text"
-                                value={editExpenseForm.note}
-                                onChange={(e) => setEditExpenseForm((prev) => ({ ...prev, note: e.target.value }))}
-                                className="w-full bg-black/40 border border-white/20 rounded px-2 py-1 text-xs"
-                              />
-                            </td>
-                            <td className="py-2 text-right space-x-2">
-                              <button
-                                onClick={() => handleSaveExpenseEdit(expense.id)}
-                                className="text-xs text-emerald-300 hover:text-emerald-200"
-                              >
-                                Save
-                              </button>
-                              <button
-                                onClick={handleCancelEditExpense}
-                                className="text-xs text-white/70 hover:text-white"
-                              >
-                                Cancel
-                              </button>
-                            </td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="py-2 text-white/80">{expense.expense_date}</td>
-                            <td className="py-2 capitalize text-white/80">{expense.category}</td>
-                            <td className="py-2 text-white/90">{formatINR(expense.amount)}</td>
-                            <td className="py-2 text-white/60">{expense.note || '-'}</td>
-                            <td className="py-2 text-right space-x-2">
-                              <button
-                                onClick={() => handleStartEditExpense(expense)}
-                                className="text-xs text-amber-300 hover:text-amber-200"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                onClick={() => handleDeleteExpense(expense.id)}
-                                className="text-xs text-red-300 hover:text-red-200"
-                              >
-                                Delete
-                              </button>
-                            </td>
-                          </>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-3">
+                {selectedCategory && (
+                  <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-emerald-100">
+                        Filtering by: <span className="font-semibold capitalize">{selectedCategory}</span>
+                      </p>
+                      <p className="text-xs text-emerald-300">({filteredExpenses.length} expenses)</p>
+                    </div>
+                    <button
+                      onClick={() => setSelectedCategory(null)}
+                      className="text-xs text-emerald-300 hover:text-emerald-200 font-semibold"
+                    >
+                      Clear Filter
+                    </button>
+                  </div>
+                )}
+                <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+                  <div className="flex gap-2 items-center flex-1">
+                    <label className="text-xs text-white/70 whitespace-nowrap">Sort by:</label>
+                    <select
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      className="bg-black/40 border border-white/20 rounded px-2 py-1 text-xs text-white"
+                    >
+                      <option value="date-desc">Date (Newest)</option>
+                      <option value="date-asc">Date (Oldest)</option>
+                      <option value="amount-desc">Amount (High to Low)</option>
+                      <option value="amount-asc">Amount (Low to High)</option>
+                      <option value="category-asc">Category (A-Z)</option>
+                    </select>
+                  </div>
+                  <div className="flex gap-2 items-center flex-1">
+                    <label className="text-xs text-white/70 whitespace-nowrap">Group by:</label>
+                    <select
+                      value={groupBy || ''}
+                      onChange={(e) => setGroupBy(e.target.value || null)}
+                      className="bg-black/40 border border-white/20 rounded px-2 py-1 text-xs text-white"
+                    >
+                      <option value="">None</option>
+                      <option value="category">Category</option>
+                      <option value="date">Date</option>
+                      <option value="month">Month</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  {filteredExpenses.length === 0 ? (
+                    <p className="text-white/60 text-sm">No expenses found{selectedCategory ? ` in ${selectedCategory} category` : ''}.</p>
+                  ) : (
+                    <div>
+                      {groupBy ? (
+                        Object.entries(sortedAndGroupedExpenses).map(([groupKey, groupedItems]) => (
+                          <div key={groupKey} className="mb-6">
+                            <div className="bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3 mb-3">
+                              <p className="text-sm font-semibold text-emerald-100">
+                                {groupBy === 'category' ? `Category: ${groupKey}` : groupBy === 'month' ? `Month: ${groupKey}` : `Date: ${groupKey}`}
+                              </p>
+                              <p className="text-xs text-emerald-300">
+                                {groupedItems.length} {groupedItems.length === 1 ? 'expense' : 'expenses'} • Total: {formatINR(groupedItems.reduce((sum, e) => sum + Number(e.amount), 0))}
+                              </p>
+                            </div>
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-left text-white/50 border-b border-white/10">
+                                  <th className="py-2">Date</th>
+                                  <th className="py-2">Category</th>
+                                  <th className="py-2">Amount</th>
+                                  <th className="py-2">Note</th>
+                                  <th className="py-2 text-right">Action</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {groupedItems.map((expense) => renderExpenseRow(expense))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ))
+                      ) : (
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="text-left text-white/50 border-b border-white/10">
+                              <th className="py-2">Date</th>
+                              <th className="py-2">Category</th>
+                              <th className="py-2">Amount</th>
+                              <th className="py-2">Note</th>
+                              <th className="py-2 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sortedAndGroupedExpenses.ungrouped?.map((expense) => renderExpenseRow(expense))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+                </div>
+
               </div>
             )}
           </section>
@@ -595,6 +751,8 @@ function BudgetManager() {
           )}
         </div>
       </div>
+
+      <SmartFinFooter iconClass="text-emerald-400" statusDotClass="bg-emerald-400" />
     </div>
   );
 }

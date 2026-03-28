@@ -11,7 +11,7 @@ const Footer = () => {
               <span className="font-display font-bold text-lg text-white">SmartFin</span>
             </a>
             <p className="text-sm text-white/40 max-w-xs">
-              AI-powered financial intelligence for smarter money management. A college project demonstrating modern web technologies.
+              AI-powered financial intelligence for smarter money management. A personal project demonstrating modern web technologies.
             </p>
           </div>
           <div>

@@ -10,7 +10,15 @@ Phase-1 upgrade over static rule-based logic:
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
+import re
 from typing import Dict, List, Tuple
+
+try:
+    import boto3
+except Exception:  # pragma: no cover - optional at runtime
+    boto3 = None
 
 
 @dataclass
@@ -30,6 +38,152 @@ class UserFinanceProfile:
 
 class PersonalizedGuidanceEngine:
     """Generates ranked guidance and investment suggestions."""
+
+    @staticmethod
+    def _ai_enabled() -> bool:
+        """Feature-flag AI guidance; enabled by default with graceful fallback."""
+        return os.environ.get("SMARTFIN_AI_GUIDANCE_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+    @staticmethod
+    def _model_id() -> str:
+        return os.environ.get("SMARTFIN_GUIDANCE_MODEL_ID") or os.environ.get("BEDROCK_MODEL_ID", "amazon.nova-pro-v1:0")
+
+    @staticmethod
+    def _bedrock_region() -> str:
+        return os.environ.get("AWS_REGION", "us-east-1")
+
+    @classmethod
+    def _invoke_bedrock_json(cls, prompt: str, max_tokens: int = 900) -> Dict | None:
+        """Call Bedrock and parse a JSON object from response text."""
+        if not cls._ai_enabled() or boto3 is None:
+            return None
+
+        try:
+            client = boto3.client("bedrock-runtime", region_name=cls._bedrock_region())
+            response = client.converse(
+                modelId=cls._model_id(),
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"text": prompt}],
+                    }
+                ],
+                inferenceConfig={
+                    "maxTokens": max_tokens,
+                    "temperature": 0.2,
+                    "topP": 0.9,
+                },
+            )
+
+            text = ""
+            blocks = (((response or {}).get("output") or {}).get("message") or {}).get("content", [])
+            for block in blocks:
+                if isinstance(block, dict) and isinstance(block.get("text"), str):
+                    text += block["text"]
+
+            if not text.strip():
+                return None
+
+            # Handle direct JSON and fenced JSON.
+            cleaned = text.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\\s*", "", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"\\s*```$", "", cleaned)
+
+            try:
+                parsed = json.loads(cleaned)
+                return parsed if isinstance(parsed, dict) else None
+            except Exception:
+                match = re.search(r"\{[\s\S]*\}", text)
+                if not match:
+                    return None
+                parsed = json.loads(match.group(0))
+                return parsed if isinstance(parsed, dict) else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _sanitize_guidance_shape(payload: Dict | None) -> Dict | None:
+        if not isinstance(payload, dict):
+            return None
+        recs = payload.get("recommendations", [])
+        strengths = payload.get("strengths", [])
+        warnings = payload.get("warnings", [])
+        if not isinstance(recs, list) or not isinstance(strengths, list) or not isinstance(warnings, list):
+            return None
+        return {
+            "recommendations": [str(x).strip() for x in recs if str(x).strip()][:6],
+            "strengths": [str(x).strip() for x in strengths if str(x).strip()][:6],
+            "warnings": [str(x).strip() for x in warnings if str(x).strip()][:6],
+        }
+
+    @staticmethod
+    def _sanitize_investment_shape(payload: Dict | None) -> Dict | None:
+        if not isinstance(payload, dict):
+            return None
+        eligible = bool(payload.get("eligible", False))
+        suggestions = payload.get("suggestions", [])
+        message = str(payload.get("message", "")).strip()
+        advice = str(payload.get("advice", "")).strip() or message
+        if not isinstance(suggestions, list):
+            return None
+
+        normalized = []
+        for s in suggestions[:8]:
+            if not isinstance(s, dict):
+                continue
+            normalized.append(
+                {
+                    "type": str(s.get("type", "")).strip() or "Investment Option",
+                    "risk_level": str(s.get("risk_level", "Medium")).strip() or "Medium",
+                    "allocation": int(float(s.get("allocation", 0) or 0)),
+                    "description": str(s.get("description", "")).strip() or "Personalized recommendation based on financial profile.",
+                    "suitable": bool(s.get("suitable", True)),
+                }
+            )
+
+        return {
+            "eligible": eligible,
+            "suggestions": normalized,
+            "message": message or "Personalized investment guidance generated from your financial profile.",
+            "advice": advice or "Personalized investment guidance generated from your financial profile.",
+        }
+
+    @classmethod
+    def _ai_guidance(cls, data: Dict, score: float, patterns: Dict) -> Dict | None:
+        prompt = (
+            "You are a senior financial planning assistant for Indian users. "
+            "Generate concise, high-impact, data-grounded guidance. "
+            "Return ONLY valid JSON with keys: recommendations (list of strings), strengths (list of strings), warnings (list of strings). "
+            "No markdown, no extra keys, no prose outside JSON.\\n\\n"
+            f"financial_score: {float(score):.2f}\\n"
+            f"user_data: {json.dumps(data, ensure_ascii=True)}\\n"
+            f"spending_patterns: {json.dumps(patterns, ensure_ascii=True)}\\n\\n"
+            "Rules:\\n"
+            "- Recommendations must be actionable and specific (include numbers/percentages where possible).\\n"
+            "- Keep each line under 140 chars.\\n"
+            "- Prioritize debt stress, savings consistency, and expense concentration.\\n"
+            "- Maximum 5 recommendations, 4 strengths, 4 warnings."
+        )
+        return cls._sanitize_guidance_shape(cls._invoke_bedrock_json(prompt, max_tokens=700))
+
+    @classmethod
+    def _ai_investments(cls, score: float, data: Dict, patterns: Dict) -> Dict | None:
+        prompt = (
+            "You are a senior investment advisor for Indian users. "
+            "Generate personalized investment recommendations from user's cashflow and risk signals. "
+            "Return ONLY valid JSON with keys: eligible (boolean), suggestions (list), message (string), advice (string). "
+            "Each suggestion must be an object with keys: type, risk_level, allocation, description, suitable. "
+            "No markdown, no extra keys.\\n\\n"
+            f"financial_score: {float(score):.2f}\\n"
+            f"user_data: {json.dumps(data, ensure_ascii=True)}\\n"
+            f"spending_patterns: {json.dumps(patterns, ensure_ascii=True)}\\n\\n"
+            "Rules:\\n"
+            "- Allocate monthly savings amount intelligently across 2-4 buckets.\\n"
+            "- If score is weak or debt burden is high, recommend capital-protection first.\\n"
+            "- Keep message and advice concise and practical."
+        )
+        return cls._sanitize_investment_shape(cls._invoke_bedrock_json(prompt, max_tokens=900))
 
     @staticmethod
     def _safe_num(value) -> float:
@@ -80,7 +234,13 @@ class PersonalizedGuidanceEngine:
         return [(k, v) for k, v in categories if v > 0][:2]
 
     @classmethod
-    def generate_guidance(cls, data: Dict, score: float, patterns: Dict) -> Dict:
+    def generate_guidance(cls, data: Dict, score: float, patterns: Dict, return_meta: bool = False):
+        ai_guidance = cls._ai_guidance(data, score, patterns)
+        if ai_guidance:
+            if return_meta:
+                return ai_guidance, {"source": "ai", "engine": "bedrock"}
+            return ai_guidance
+
         profile = cls._build_profile(data, score, patterns)
 
         guidance = {
@@ -154,10 +314,23 @@ class PersonalizedGuidanceEngine:
                 ordered.append(rec)
 
         guidance["recommendations"] = ordered[:5]
+        if return_meta:
+            return guidance, {"source": "fallback", "engine": "deterministic"}
         return guidance
 
     @classmethod
-    def suggest_investments(cls, score: float, data: Dict, patterns: Dict) -> Dict:
+    def generate_guidance_ai(cls, data: Dict, score: float, patterns: Dict, return_meta: bool = False):
+        """AI-first guidance API with deterministic fallback."""
+        return cls.generate_guidance(data, score, patterns, return_meta=return_meta)
+
+    @classmethod
+    def suggest_investments(cls, score: float, data: Dict, patterns: Dict, return_meta: bool = False):
+        ai_investments = cls._ai_investments(score, data, patterns)
+        if ai_investments:
+            if return_meta:
+                return ai_investments, {"source": "ai", "engine": "bedrock"}
+            return ai_investments
+
         profile = cls._build_profile(data, score, patterns)
 
         monthly_savings = int(profile.monthly_savings)
@@ -224,12 +397,20 @@ class PersonalizedGuidanceEngine:
 
         message = cls.get_investment_advice(profile.score)
 
-        return {
+        fallback_result = {
             "eligible": eligible,
             "suggestions": suggestions,
             "message": message,
             "advice": message,
         }
+        if return_meta:
+            return fallback_result, {"source": "fallback", "engine": "deterministic"}
+        return fallback_result
+
+    @classmethod
+    def suggest_investments_ai(cls, score: float, data: Dict, patterns: Dict, return_meta: bool = False):
+        """AI-first investments API with deterministic fallback."""
+        return cls.suggest_investments(score, data, patterns, return_meta=return_meta)
 
     @staticmethod
     def get_investment_advice(score: float) -> str:

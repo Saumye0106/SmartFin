@@ -889,6 +889,57 @@ const api = {
       throw new Error('Failed to clear chat history');
     }
   },
+
+  async getChatSessions() {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/chat/sessions`);
+      return response.data;
+    } catch (error) {
+      console.error('Get chat sessions error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to fetch chat sessions';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async getChatHistory(sessionId = null) {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/chat/history`, {
+        params: sessionId ? { session_id: sessionId } : undefined,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Get chat history error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to fetch chat history';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async renameChatSession(sessionId, title) {
+    try {
+      const response = await axios.put(`${API_BASE_URL}/api/chat/session/title`, {
+        session_id: sessionId,
+        title,
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Rename chat session error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to rename chat session';
+      throw new Error(errorMsg);
+    }
+  },
+
+  async deleteChatSession(sessionId) {
+    try {
+      const response = await axios.delete(`${API_BASE_URL}/api/chat/session`, {
+        data: { session_id: sessionId },
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Delete chat session error:', error);
+      const errorMsg = error?.response?.data?.error || 'Failed to delete chat session';
+      throw new Error(errorMsg);
+    }
+  },
 };
 
 

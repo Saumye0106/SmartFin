@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
+import SmartFinFooter from './SmartFinFooter';
 import api from '../services/api';
 import './ChatAgent.css';
 
@@ -377,10 +378,151 @@ const ChatAgent = () => {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [sessionId, setSessionId] = useState(null);
+  const [chatSessions, setChatSessions] = useState([]);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+  const [renamingSessionId, setRenamingSessionId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [lastOpenedSessionId, setLastOpenedSessionId] = useState(null);
+  const [pendingDeleteSession, setPendingDeleteSession] = useState(null);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const [voiceError, setVoiceError] = useState(null);
   const [error, setError] = useState(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const textareaRef = useRef(null);
+  const inputValueRef = useRef('');
+  const recognitionRef = useRef(null);
+  const speechBaseTextRef = useRef('');
+  const speechStartingRef = useRef(false);
+  const speechStopRequestedRef = useRef(false);
+  const speechFallbackTriedRef = useRef(false);
+  const speechRetryCountRef = useRef(0);
+  const speechRetryTimerRef = useRef(null);
+
+  useEffect(() => {
+    inputValueRef.current = inputValue;
+  }, [inputValue]);
+
+  const parseHistoryMessageText = useCallback((content) => {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content
+        .filter((block) => block && typeof block === 'object' && typeof block.text === 'string')
+        .map((block) => block.text)
+        .join('\n')
+        .trim();
+    }
+    return '';
+  }, []);
+
+  const toDisplayMessages = useCallback(
+    (history) =>
+      (history || [])
+        .filter((msg) => msg && (msg.role === 'user' || msg.role === 'assistant'))
+        .map((msg, idx) => ({
+          role: msg.role,
+          content: parseHistoryMessageText(msg.content),
+          timestamp: msg.timestamp || new Date().toISOString(),
+          _idx: idx,
+        }))
+        .filter((msg) => Boolean(msg.content)),
+    [parseHistoryMessageText]
+  );
+
+  const fetchSessions = useCallback(async () => {
+    setIsLoadingSessions(true);
+    try {
+      const response = await api.getChatSessions();
+      setChatSessions(response.sessions || []);
+    } catch (err) {
+      setError(err.message || 'Failed to load saved sessions');
+    } finally {
+      setIsLoadingSessions(false);
+    }
+  }, []);
+
+  const startRenamingSession = useCallback((session) => {
+    setRenamingSessionId(session.session_id);
+    setRenameValue(session.title || 'Untitled Chat');
+  }, []);
+
+  const cancelRenamingSession = useCallback(() => {
+    setRenamingSessionId(null);
+    setRenameValue('');
+  }, []);
+
+  const saveSessionRename = useCallback(
+    async (targetSessionId) => {
+      const trimmed = renameValue.trim();
+      if (!trimmed) return;
+      try {
+        await api.renameChatSession(targetSessionId, trimmed);
+        setRenamingSessionId(null);
+        setRenameValue('');
+        fetchSessions();
+      } catch (err) {
+        setError(err.message || 'Failed to rename session');
+      }
+    },
+    [renameValue, fetchSessions]
+  );
+
+  const handleDeleteSession = useCallback(
+    async (targetSessionId) => {
+      try {
+        await api.deleteChatSession(targetSessionId);
+        if (targetSessionId === sessionId) {
+          setSessionId(null);
+          setMessages([]);
+        }
+        if (targetSessionId === lastOpenedSessionId) {
+          setLastOpenedSessionId(null);
+        }
+        fetchSessions();
+      } catch (err) {
+        setError(err.message || 'Failed to delete session');
+      }
+    },
+    [fetchSessions, lastOpenedSessionId, sessionId]
+  );
+
+  const confirmDeleteSession = useCallback(async () => {
+    if (!pendingDeleteSession?.session_id) return;
+    await handleDeleteSession(pendingDeleteSession.session_id);
+    setPendingDeleteSession(null);
+  }, [handleDeleteSession, pendingDeleteSession]);
+
+  const loadSession = useCallback(
+    async (nextSessionId) => {
+      if (!nextSessionId) return;
+      setError(null);
+      setIsLoading(true);
+      try {
+        const response = await api.getChatHistory(nextSessionId);
+        setSessionId(nextSessionId);
+        setLastOpenedSessionId(nextSessionId);
+        setMessages(toDisplayMessages(response.history));
+      } catch (err) {
+        setError(err.message || 'Failed to load chat history');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [toDisplayMessages]
+  );
+
+  const startNewSession = useCallback(() => {
+    const nextSessionId = `chat_${Date.now()}`;
+    setSessionId(nextSessionId);
+    setMessages([]);
+    setError(null);
+    if (textareaRef.current) textareaRef.current.style.height = '24px';
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  }, []);
 
   // Auto-scroll to bottom
   const scrollToBottom = useCallback(() => {
@@ -390,6 +532,163 @@ const ChatAgent = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading, scrollToBottom]);
+
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setSpeechSupported(false);
+      return undefined;
+    }
+
+    setSpeechSupported(true);
+    const recognition = new SpeechRecognition();
+    const clearRetryTimer = () => {
+      if (speechRetryTimerRef.current) {
+        clearTimeout(speechRetryTimerRef.current);
+        speechRetryTimerRef.current = null;
+      }
+    };
+
+    const queueRecognitionRetry = (delayMs = 300) => {
+      clearRetryTimer();
+      speechRetryTimerRef.current = setTimeout(() => {
+        speechRetryTimerRef.current = null;
+        try {
+          recognition.start();
+        } catch {
+          // If retry fails, the user can try manually.
+        }
+      }, delayMs);
+    };
+
+    const configureRecognition = (useFallback = false) => {
+      recognition.lang = useFallback ? (navigator.language || 'en-US') : 'en-IN';
+      recognition.continuous = !useFallback;
+      recognition.interimResults = !useFallback;
+      recognition.maxAlternatives = 1;
+    };
+    configureRecognition(false);
+
+    recognition.onstart = () => {
+      clearRetryTimer();
+      speechStartingRef.current = false;
+      speechRetryCountRef.current = 0;
+      setIsListening(true);
+      setVoiceError(null);
+      speechBaseTextRef.current = (inputValueRef.current || '').trim();
+    };
+
+    recognition.onend = () => {
+      clearRetryTimer();
+      speechStartingRef.current = false;
+      setIsListening(false);
+      speechBaseTextRef.current = (inputValueRef.current || '').trim();
+      speechStopRequestedRef.current = false;
+    };
+
+    recognition.onerror = (event) => {
+      speechStartingRef.current = false;
+      if (event.error === 'aborted') {
+        return;
+      }
+      if (event.error === 'no-speech') {
+        setVoiceError('No speech detected. Please try again.');
+      } else if (event.error === 'not-allowed') {
+        setVoiceError('Microphone permission denied. Enable mic access in your browser.');
+      } else if (event.error === 'service-not-allowed') {
+        setVoiceError('Speech recognition service is blocked in this browser/profile.');
+      } else if (event.error === 'audio-capture') {
+        setVoiceError('No microphone found. Connect a mic and try again.');
+      } else if (event.error === 'network') {
+        if (navigator.onLine === false) {
+          setVoiceError('You appear to be offline. Reconnect internet and try voice typing again.');
+          return;
+        }
+
+        // Detect if browser is Brave or another privacy-focused browser
+        const isBrave = navigator.brave ? true : /Brave/.test(navigator.userAgent);
+        if (isBrave) {
+          setVoiceError('Brave blocks Web Speech API by default. Try Chrome, Edge, or Safari, or enable it in Brave settings.');
+          return;
+        }
+
+        // Retry once for transient network issues
+        if (speechRetryCountRef.current === 0) {
+          speechRetryCountRef.current = 1;
+          configureRecognition(true);
+          setVoiceError('Network issue detected. Retrying...');
+          queueRecognitionRetry(400);
+          return;
+        }
+
+        // If retry failed, likely a persistent service issue
+        setVoiceError('Voice typing is unavailable. Try a different browser (Chrome/Edge/Safari) or keep typing manually.');
+      } else if (event.error === 'language-not-supported') {
+        if (!speechFallbackTriedRef.current) {
+          speechFallbackTriedRef.current = true;
+          configureRecognition(true);
+          setVoiceError('Language fallback applied. Retrying voice typing...');
+          queueRecognitionRetry(250);
+          return;
+        }
+        setVoiceError('Selected speech language is not supported in this browser.');
+      } else {
+        setVoiceError(`Voice typing error: ${event.error || 'unknown'}. Please try again.`);
+      }
+    };
+
+    recognition.onresult = (event) => {
+      let finalText = '';
+      let interimText = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = (event.results[i][0]?.transcript || '').trim();
+        if (!transcript) continue;
+        if (event.results[i].isFinal) {
+          finalText += `${transcript} `;
+        } else {
+          interimText += `${transcript} `;
+        }
+      }
+
+      if (finalText.trim()) {
+        speechBaseTextRef.current = [speechBaseTextRef.current, finalText.trim()].filter(Boolean).join(' ').trim();
+      }
+
+      const composed = [speechBaseTextRef.current, interimText.trim()]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      setInputValue(composed);
+      setTimeout(() => handleTextareaResize(), 0);
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      clearRetryTimer();
+      try {
+        recognition.stop();
+      } catch {
+        // ignore cleanup stop errors
+      }
+      recognitionRef.current = null;
+      speechFallbackTriedRef.current = false;
+      speechRetryCountRef.current = 0;
+    };
+  }, []);
+
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
+
+  useEffect(() => {
+    if (!sessionId && chatSessions.length > 0) {
+      loadSession(chatSessions[0].session_id);
+    }
+  }, [chatSessions, loadSession, sessionId]);
 
   // Auto-resize textarea
   const handleTextareaResize = () => {
@@ -404,6 +703,14 @@ const ChatAgent = () => {
   const sendMessage = async (text) => {
     const message = text || inputValue.trim();
     if (!message || isLoading) return;
+
+    if (isListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+    }
 
     setInputValue('');
     setError(null);
@@ -422,7 +729,10 @@ const ChatAgent = () => {
       const response = await api.sendChatMessage(message, sessionId);
 
       if (response.success) {
-        if (response.session_id) setSessionId(response.session_id);
+        if (response.session_id) {
+          setSessionId(response.session_id);
+          setLastOpenedSessionId(response.session_id);
+        }
 
         const assistantMsg = {
           role: 'assistant',
@@ -431,6 +741,7 @@ const ChatAgent = () => {
           timestamp: response.timestamp || new Date().toISOString(),
         };
         setMessages((prev) => [...prev, assistantMsg]);
+        fetchSessions();
       } else {
         setError(response.error || 'Something went wrong');
       }
@@ -449,16 +760,70 @@ const ChatAgent = () => {
     }
   };
 
+  const handleVoiceToggle = () => {
+    if (!speechSupported || isLoading) return;
+    setVoiceError(null);
+
+    if (navigator.onLine === false) {
+      setVoiceError('You are offline. Reconnect internet and try voice typing again.');
+      return;
+    }
+
+    if (!window.isSecureContext) {
+      setVoiceError('Voice typing requires a secure context (HTTPS or localhost).');
+      return;
+    }
+
+    if (!recognitionRef.current) {
+      setVoiceError('Voice typing is unavailable in this browser.');
+      return;
+    }
+
+    if (isListening || speechStartingRef.current) {
+      speechStopRequestedRef.current = true;
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    try {
+      speechFallbackTriedRef.current = false;
+      speechRetryCountRef.current = 0;
+      if (speechRetryTimerRef.current) {
+        clearTimeout(speechRetryTimerRef.current);
+        speechRetryTimerRef.current = null;
+      }
+      speechStartingRef.current = true;
+      speechStopRequestedRef.current = false;
+      recognitionRef.current.start();
+    } catch (e) {
+      speechStartingRef.current = false;
+      if (e?.name === 'InvalidStateError') {
+        setVoiceError('Voice capture is already starting. Please wait a second and try again.');
+      } else {
+        setVoiceError('Could not start voice typing. Please try again.');
+      }
+    }
+  };
+
   // Clear chat
   const handleClearChat = async () => {
+    if (!sessionId) {
+      setMessages([]);
+      return;
+    }
     try {
       await api.clearChatHistory(sessionId);
     } catch (e) {
       // ignore
     }
     setMessages([]);
-    setSessionId(null);
     setError(null);
+    setVoiceError(null);
+    fetchSessions();
   };
 
   // Format timestamp
@@ -523,6 +888,92 @@ const ChatAgent = () => {
 
       {/* Chat Container */}
       <div className="chat-container">
+        <aside className="chat-session-panel">
+          <div className="chat-session-header">
+            <p className="chat-session-title">Saved Chats</p>
+            <div className="chat-session-actions">
+              <button className="chat-session-btn" onClick={startNewSession}>
+                <iconify-icon icon="solar:add-circle-linear" width="14"></iconify-icon>
+                <span>New</span>
+              </button>
+              <button className="chat-session-btn" onClick={fetchSessions} disabled={isLoadingSessions}>
+                <iconify-icon icon="solar:refresh-linear" width="14"></iconify-icon>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+          <div className="chat-session-list">
+            {isLoadingSessions ? (
+              <p className="chat-session-empty">Loading sessions...</p>
+            ) : chatSessions.length === 0 ? (
+              <p className="chat-session-empty">No saved chats yet.</p>
+            ) : (
+              chatSessions.map((session) => (
+                <div
+                  key={session.session_id}
+                  className={`chat-session-item ${sessionId === session.session_id ? 'active' : ''} ${lastOpenedSessionId === session.session_id ? 'last-opened' : ''}`}
+                  onClick={() => loadSession(session.session_id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      loadSession(session.session_id);
+                    }
+                  }}
+                >
+                  {renamingSessionId === session.session_id ? (
+                    <div className="chat-session-rename-row" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        className="chat-session-rename-input"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveSessionRename(session.session_id);
+                          if (e.key === 'Escape') cancelRenamingSession();
+                        }}
+                        autoFocus
+                      />
+                      <button className="chat-session-icon-btn" onClick={() => saveSessionRename(session.session_id)}>
+                        <iconify-icon icon="solar:check-circle-linear" width="14"></iconify-icon>
+                      </button>
+                      <button className="chat-session-icon-btn" onClick={cancelRenamingSession}>
+                        <iconify-icon icon="solar:close-circle-linear" width="14"></iconify-icon>
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="chat-session-item-top">
+                        <span className="chat-session-item-title">{session.title || 'Untitled Chat'}</span>
+                        <div className="chat-session-item-tools" onClick={(e) => e.stopPropagation()}>
+                          <button className="chat-session-icon-btn" onClick={() => startRenamingSession(session)}>
+                            <iconify-icon icon="solar:pen-linear" width="12"></iconify-icon>
+                          </button>
+                          <button className="chat-session-icon-btn danger" onClick={() => setPendingDeleteSession(session)}>
+                            <iconify-icon icon="solar:trash-bin-trash-linear" width="12"></iconify-icon>
+                          </button>
+                        </div>
+                      </div>
+                      {lastOpenedSessionId === session.session_id && <span className="chat-session-tag">Last opened</span>}
+                      <span className="chat-session-item-meta">{formatTime(session.last_message_at || session.updated_at)}</span>
+                    </>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </aside>
+
+        <div className="chat-main-pane">
+        <div className="chat-pane-header">
+          <div className="chat-pane-eyebrow">
+            <span className="chat-pane-dot"></span>
+            <span>AI Assistant</span>
+          </div>
+          <h1 className="chat-pane-title">SmartFin <span className="chat-pane-title-accent">Chatbot</span></h1>
+          <p className="chat-pane-subtitle">Ask about budgets, loans, goals, and retirement with context from your saved data.</p>
+        </div>
+
         {/* Welcome Screen or Messages */}
         {!hasMessages ? (
           <div className="chat-welcome">
@@ -530,7 +981,7 @@ const ChatAgent = () => {
               <iconify-icon icon="solar:chat-round-dots-bold-duotone" width="40" style={{ color: 'rgba(236, 72, 153, 0.7)' }}></iconify-icon>
             </div>
             <div>
-              <h1 className="welcome-title">SmartFin AI Assistant</h1>
+              <h2 className="welcome-title">SmartFin AI Assistant</h2>
               <p className="welcome-subtitle">
                 I can analyze your finances, run what-if simulations, plan your retirement, 
                 and provide personalized financial advice. How can I help you today?
@@ -625,6 +1076,14 @@ const ChatAgent = () => {
               rows={1}
             />
             <button
+              className={`chat-voice-btn ${isListening ? 'listening' : ''}`}
+              onClick={handleVoiceToggle}
+              disabled={!speechSupported || isLoading}
+              title={speechSupported ? (isListening ? 'Stop voice typing' : 'Start voice typing') : 'Voice typing not supported'}
+            >
+              <iconify-icon icon={isListening ? 'solar:stop-circle-linear' : 'solar:microphone-linear'} width="18"></iconify-icon>
+            </button>
+            <button
               className="chat-send-btn"
               onClick={() => sendMessage()}
               disabled={!inputValue.trim() || isLoading}
@@ -634,8 +1093,11 @@ const ChatAgent = () => {
             </button>
           </div>
           <div className="chat-input-hint">
-            SmartFin AI can analyze your data, run simulations, and provide financial advice
+            {isListening
+              ? 'Listening... speak clearly to fill the message box'
+              : 'SmartFin AI can analyze your data, run simulations, and provide financial advice'}
           </div>
+          {voiceError && <div className="chat-voice-error">{voiceError}</div>}
           <div className="quick-shortcuts">
             {QUICK_SHORTCUTS.map((prompt) => (
               <button
@@ -649,7 +1111,32 @@ const ChatAgent = () => {
             ))}
           </div>
         </div>
+        </div>
       </div>
+
+      {pendingDeleteSession && (
+        <div className="chat-modal-overlay" role="dialog" aria-modal="true">
+          <div className="chat-modal-card">
+            <div className="chat-modal-header">
+              <iconify-icon icon="solar:danger-circle-linear" width="18"></iconify-icon>
+              <h3>Delete chat session?</h3>
+            </div>
+            <p className="chat-modal-text">
+              This will permanently remove <strong>{pendingDeleteSession.title || 'Untitled Chat'}</strong> and its saved history.
+            </p>
+            <div className="chat-modal-actions">
+              <button className="chat-modal-btn" onClick={() => setPendingDeleteSession(null)}>
+                Cancel
+              </button>
+              <button className="chat-modal-btn danger" onClick={confirmDeleteSession}>
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <SmartFinFooter iconClass="text-pink-400" statusDotClass="bg-pink-400" />
     </div>
   );
 };

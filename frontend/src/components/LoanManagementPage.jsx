@@ -5,6 +5,7 @@ import LoanForm from './LoanForm';
 import PaymentForm from './PaymentForm';
 import PaymentHistoryView from './PaymentHistoryView';
 import Sidebar from './Sidebar';
+import SmartFinFooter from './SmartFinFooter';
 import api from '../services/api';
 
 function LoanManagementPage() {
@@ -157,12 +158,16 @@ function LoanManagementPage() {
       <div className="relative z-10 pt-24 pb-12 px-6 ml-20">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold mb-2 bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">
-              Loan Management
+          <section className="mb-12">
+            <div className="flex items-center gap-2 mb-4">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse"></span>
+              <span className="text-xs text-white/50 font-medium tracking-widest uppercase">Credit and Repayments</span>
+            </div>
+            <h1 className="font-display text-4xl md:text-5xl font-bold text-white mb-4 tracking-tight">
+              Loan <span className="bg-gradient-to-r from-purple-400 to-blue-400 bg-clip-text text-transparent">Management</span>
             </h1>
-            <p className="text-white/60">Track and manage your loans and payments</p>
-          </div>
+            <p className="text-white/50 max-w-2xl">Track and manage your loans, payments, and repayment progress in one place.</p>
+          </section>
 
           {/* Error Display */}
           {error && (
@@ -257,6 +262,8 @@ function LoanManagementPage() {
           )}
         </div>
       </div>
+
+      <SmartFinFooter iconClass="text-purple-400" statusDotClass="bg-purple-400" />
     </div>
   );
 }

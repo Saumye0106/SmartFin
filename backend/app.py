@@ -302,6 +302,20 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     ''')
+
+    # Persistent chat sessions table
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            session_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            title TEXT,
+            conversation_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            last_message_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    ''')
     
     # Create indexes for better query performance
     cur.execute('CREATE INDEX IF NOT EXISTS idx_users_profile_user_id ON users_profile(user_id)')
@@ -325,6 +339,10 @@ def init_db():
     cur.execute('CREATE INDEX IF NOT EXISTS idx_budget_categories_budget_id ON budget_categories(budget_id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_expense_entries_user_date ON expense_entries(user_id, expense_date)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_expense_entries_category ON expense_entries(category)')
+
+    # Chat session indexes
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_chat_sessions_last_message_at ON chat_sessions(last_message_at)')
     
     db.commit()
     db.close()
@@ -684,7 +702,16 @@ def generate_guidance(data, score, patterns):
     Generate personalized financial guidance based on score and patterns
     """
     try:
-        return PersonalizedGuidanceEngine.generate_guidance(data, score, patterns)
+        guidance, meta = PersonalizedGuidanceEngine.generate_guidance_ai(
+            data, score, patterns, return_meta=True
+        )
+        app.logger.info(
+            "guidance_engine source=%s engine=%s score=%.2f",
+            meta.get('source'),
+            meta.get('engine'),
+            float(score or 0),
+        )
+        return guidance
     except Exception:
         # Keep legacy fallback behavior for resilience.
         pass
@@ -803,7 +830,16 @@ def suggest_investments(score, data, patterns):
     Rule-based investment suggestions based on score and financial profile
     """
     try:
-        return PersonalizedGuidanceEngine.suggest_investments(score, data, patterns)
+        investments, meta = PersonalizedGuidanceEngine.suggest_investments_ai(
+            score, data, patterns, return_meta=True
+        )
+        app.logger.info(
+            "investment_engine source=%s engine=%s score=%.2f",
+            meta.get('source'),
+            meta.get('engine'),
+            float(score or 0),
+        )
+        return investments
     except Exception:
         # Keep legacy fallback behavior for resilience.
         pass
@@ -1072,9 +1108,97 @@ def model_info():
 
 # ==================== CHAT AGENT ENDPOINT ====================
 
-# In-memory conversation store (per user session)
-# In production, use Redis or DB for persistence
-chat_sessions = {}
+def _build_chat_session_title(text):
+    """Generate a concise session title from the first user message."""
+    if not text:
+        return 'New Chat'
+    normalized = ' '.join(text.strip().split())
+    return (normalized[:57] + '...') if len(normalized) > 60 else normalized
+
+
+def _normalize_session_id(user_id, raw_session_id):
+    """Ensure session IDs are user-scoped to avoid cross-user collisions."""
+    base = (raw_session_id or '').strip()
+    if not base:
+        return f'user_{user_id}_default'
+    user_prefix = f'user_{user_id}_'
+    if base.startswith(user_prefix):
+        return base
+    return f'{user_prefix}{base}'
+
+
+def _load_chat_history(user_id, session_id):
+    """Load a user's chat history from persistent storage."""
+    row = execute_query(
+        'SELECT conversation_json FROM chat_sessions WHERE session_id = ? AND user_id = ?',
+        (session_id, user_id),
+        fetch_one=True
+    )
+    if not row:
+        return []
+
+    raw = row.get('conversation_json') if isinstance(row, dict) else row['conversation_json']
+    if not raw:
+        return []
+    try:
+        history = json.loads(raw)
+        return history if isinstance(history, list) else []
+    except Exception:
+        return []
+
+
+def _save_chat_history(user_id, session_id, user_message, updated_history):
+    """Persist chat history, creating session row if missing."""
+    now_iso = datetime.now().isoformat()
+    existing = execute_query(
+        'SELECT session_id, title FROM chat_sessions WHERE session_id = ? AND user_id = ?',
+        (session_id, user_id),
+        fetch_one=True
+    )
+    title = existing['title'] if existing and existing['title'] else _build_chat_session_title(user_message)
+    # Do not persist internal synthetic context-injection messages as user-visible chat.
+    cleaned_history = []
+    for msg in (updated_history or []):
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get('role')
+        if role not in ('user', 'assistant'):
+            continue
+
+        content = msg.get('content')
+        if isinstance(content, list):
+            internal_context = False
+            for block in content:
+                if isinstance(block, dict) and isinstance(block.get('text'), str):
+                    if block['text'].startswith('Trusted user data context (from internal services, use this for grounding):'):
+                        internal_context = True
+                        break
+            if internal_context:
+                continue
+
+        cleaned_history.append(msg)
+
+    conversation_json = json.dumps(cleaned_history)
+
+    if existing:
+        execute_query(
+            '''
+            UPDATE chat_sessions
+            SET conversation_json = ?, updated_at = ?, last_message_at = ?, title = COALESCE(title, ?)
+            WHERE session_id = ? AND user_id = ?
+            ''',
+            (conversation_json, now_iso, now_iso, title, session_id, user_id),
+            commit=True
+        )
+    else:
+        execute_query(
+            '''
+            INSERT INTO chat_sessions (session_id, user_id, title, conversation_json, created_at, updated_at, last_message_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (session_id, user_id, title, conversation_json, now_iso, now_iso, now_iso),
+            commit=True
+        )
 
 @app.route('/api/chat', methods=['POST'])
 @jwt_required()
@@ -1095,16 +1219,13 @@ def chat_endpoint():
 
         data = request.get_json()
         user_message = data.get('message', '').strip()
-        session_id = data.get('session_id', f'user_{user_id}_default')
+        session_id = _normalize_session_id(user_id, data.get('session_id', f'user_{user_id}_default'))
 
         if not user_message:
             return jsonify({'error': 'Message is required'}), 400
 
-        # Get or create conversation history
-        if session_id not in chat_sessions:
-            chat_sessions[session_id] = []
-
-        conversation_history = chat_sessions[session_id]
+        # Load persisted conversation history
+        conversation_history = _load_chat_history(user_id, session_id)
 
         # Build app context for tool execution
         app_context = {
@@ -1118,8 +1239,8 @@ def chat_endpoint():
             user_message, conversation_history, app_context
         )
 
-        # Store updated history
-        chat_sessions[session_id] = updated_history
+        # Persist updated history
+        _save_chat_history(user_id, session_id, user_message, updated_history)
 
         return jsonify({
             'success': True,
@@ -1146,13 +1267,115 @@ def clear_chat():
         user_id = int(get_jwt_identity())
 
         data = request.get_json() or {}
-        session_id = data.get('session_id', f'user_{user_id}_default')
+        session_id = _normalize_session_id(user_id, data.get('session_id', f'user_{user_id}_default'))
 
-        if session_id in chat_sessions:
-            del chat_sessions[session_id]
+        execute_query(
+            'DELETE FROM chat_sessions WHERE session_id = ? AND user_id = ?',
+            (session_id, user_id),
+            commit=True
+        )
 
         return jsonify({'success': True, 'message': 'Chat history cleared'})
 
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/chat/sessions', methods=['GET'])
+@jwt_required()
+def list_chat_sessions():
+    """List saved chat sessions for the authenticated user."""
+    try:
+        user_id = int(get_jwt_identity())
+        sessions = execute_query(
+            '''
+            SELECT session_id, title, created_at, updated_at, last_message_at
+            FROM chat_sessions
+            WHERE user_id = ?
+            ORDER BY last_message_at DESC
+            ''',
+            (user_id,),
+            fetch_all=True
+        )
+        return jsonify({
+            'success': True,
+            'sessions': rows_to_list(sessions),
+            'count': len(sessions)
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/chat/history', methods=['GET'])
+@jwt_required()
+def get_chat_history():
+    """Get a full saved chat history for a session."""
+    try:
+        user_id = int(get_jwt_identity())
+        session_id = _normalize_session_id(user_id, request.args.get('session_id', f'user_{user_id}_default'))
+        history = _load_chat_history(user_id, session_id)
+        return jsonify({
+            'success': True,
+            'session_id': session_id,
+            'history': history,
+            'message_count': len(history)
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/chat/session/title', methods=['PUT'])
+@jwt_required()
+def rename_chat_session():
+    """Rename a saved chat session title."""
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+        session_id = _normalize_session_id(user_id, data.get('session_id'))
+        title = (data.get('title') or '').strip()
+
+        if not title:
+            return jsonify({'error': 'title is required'}), 400
+
+        existing = execute_query(
+            'SELECT session_id FROM chat_sessions WHERE session_id = ? AND user_id = ?',
+            (session_id, user_id),
+            fetch_one=True
+        )
+        if not existing:
+            return jsonify({'error': 'session not found'}), 404
+
+        execute_query(
+            '''
+            UPDATE chat_sessions
+            SET title = ?, updated_at = ?
+            WHERE session_id = ? AND user_id = ?
+            ''',
+            (title[:120], datetime.now().isoformat(), session_id, user_id),
+            commit=True
+        )
+
+        return jsonify({'success': True, 'session_id': session_id, 'title': title[:120]}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/chat/session', methods=['DELETE'])
+@jwt_required()
+def delete_chat_session():
+    """Delete a specific saved chat session."""
+    try:
+        user_id = int(get_jwt_identity())
+        data = request.get_json() or {}
+        session_id = _normalize_session_id(user_id, data.get('session_id'))
+
+        execute_query(
+            'DELETE FROM chat_sessions WHERE session_id = ? AND user_id = ?',
+            (session_id, user_id),
+            commit=True
+        )
+
+        return jsonify({'success': True, 'message': 'Chat session deleted'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
