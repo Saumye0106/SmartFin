@@ -302,12 +302,15 @@ def execute_tool(tool_name, tool_input, app_context):
     Execute a tool call by delegating to the appropriate backend function.
     app_context contains: flask app, user_id, request headers, etc.
     """
-    from app import (
-        app, model, feature_names, classify_score,
-        analyze_spending_patterns, generate_guidance,
-        detect_anomalies, suggest_investments,
-        get_db, row_to_dict, rows_to_list,
-        _run_prediction_analysis
+    from app import app, get_db, row_to_dict, rows_to_list
+    from legacy_scorer.model import model, feature_names
+    from legacy_scorer.service import (
+        classify_score,
+        analyze_spending_patterns,
+        generate_guidance,
+        detect_anomalies,
+        suggest_investments,
+        run_prediction_analysis as _run_prediction_analysis,
     )
     from budget.service import (
         current_month_string as _current_month_string,
