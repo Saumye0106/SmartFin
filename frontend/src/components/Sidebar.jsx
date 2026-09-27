@@ -44,6 +44,18 @@ const Sidebar = () => {
       color: 'green'
     },
     {
+      icon: 'solar:pie-chart-2-linear',
+      label: 'Portfolio',
+      path: '/portfolio',
+      color: 'purple'
+    },
+    {
+      icon: 'solar:bell-bing-linear',
+      label: 'Nudge Engine',
+      path: '/nudges',
+      color: 'pink'
+    },
+    {
       icon: 'solar:chat-round-dots-linear',
       label: 'AI Assistant',
       path: '/chat',

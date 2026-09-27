@@ -1,0 +1,291 @@
+/* NudgeEngine.css — Styles for the Behavioral Nudge Engine page */
+
+.nudge-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0c1445 100%);
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  padding: 2rem;
+}
+
+.nudge-header {
+  margin-bottom: 2rem;
+}
+
+.nudge-header h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  background: linear-gradient(90deg, #818cf8, #c084fc, #fb7185);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 0.4rem;
+}
+
+.nudge-header p {
+  color: rgba(255,255,255,0.5);
+  font-size: 0.95rem;
+}
+
+/* ── Layout ─────────────────────────────────────────────────── */
+.nudge-grid {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .nudge-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Card ───────────────────────────────────────────────────── */
+.nudge-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 1.25rem;
+  padding: 1.75rem;
+  backdrop-filter: blur(16px);
+  margin-bottom: 1.5rem;
+}
+
+.nudge-card h2 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin-bottom: 1.25rem;
+  color: rgba(255,255,255,0.85);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ── Nudge Cards ────────────────────────────────────────────── */
+.nudge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.nudge-item {
+  border-radius: 1rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.nudge-item:hover {
+  transform: translateY(-2px);
+}
+
+.nudge-item.severity-high {
+  background: rgba(239,68,68,0.08);
+  border-color: rgba(239,68,68,0.25);
+}
+
+.nudge-item.severity-medium {
+  background: rgba(245,158,11,0.08);
+  border-color: rgba(245,158,11,0.25);
+}
+
+.nudge-item.severity-low {
+  background: rgba(52,211,153,0.06);
+  border-color: rgba(52,211,153,0.2);
+}
+
+.nudge-item-blue {
+  background: rgba(99,102,241,0.08);
+  border: 1px solid rgba(99,102,241,0.2);
+}
+
+.nudge-item-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.nudge-emoji {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  margin-top: -0.1rem;
+}
+
+.nudge-label-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.2rem 0.6rem;
+  border-radius: 99px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.badge-high   { background: rgba(239,68,68,0.2);   color: #fca5a5; }
+.badge-medium { background: rgba(245,158,11,0.2);  color: #fcd34d; }
+.badge-low    { background: rgba(52,211,153,0.2);  color: #6ee7b7; }
+.badge-blue   { background: rgba(99,102,241,0.2);  color: #a5b4fc; }
+
+.nudge-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.9);
+  margin: 0;
+}
+
+.nudge-category-tag {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.4);
+  margin-bottom: 0.35rem;
+}
+
+.nudge-message {
+  font-size: 0.84rem;
+  color: rgba(255,255,255,0.65);
+  line-height: 1.55;
+  margin-bottom: 0.5rem;
+}
+
+.nudge-action {
+  font-size: 0.78rem;
+  color: rgba(255,255,255,0.4);
+  font-style: italic;
+  border-top: 1px solid rgba(255,255,255,0.05);
+  padding-top: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+/* ── Timeline ───────────────────────────────────────────────── */
+.timeline-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.3rem 0;
+}
+
+.timeline-week-label {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.4);
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.timeline-bar-track {
+  flex: 1;
+  background: rgba(255,255,255,0.05);
+  border-radius: 99px;
+  height: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+.timeline-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.6s ease;
+}
+
+.timeline-bar-fill.sev-high   { background: linear-gradient(90deg, #ef4444, #f87171); }
+.timeline-bar-fill.sev-medium { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.timeline-bar-fill.sev-low    { background: linear-gradient(90deg, #10b981, #34d399); }
+
+.timeline-score-label {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.4);
+  width: 32px;
+  text-align: right;
+}
+
+/* ── Pattern cards ─────────────────────────────────────────── */
+.pattern-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pattern-item {
+  background: rgba(99,102,241,0.07);
+  border: 1px solid rgba(99,102,241,0.15);
+  border-radius: 0.875rem;
+  padding: 1rem 1.1rem;
+}
+
+.pattern-cat {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #a5b4fc;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 0.35rem;
+}
+
+.pattern-desc {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.7);
+  line-height: 1.5;
+}
+
+.pattern-ratio {
+  display: inline-block;
+  margin-top: 0.4rem;
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.35);
+}
+
+/* ── Model info sidebar ─────────────────────────────────────── */
+.model-info-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.model-info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-size: 0.82rem;
+}
+
+.model-info-row:last-child { border-bottom: none; }
+
+.model-info-key { color: rgba(255,255,255,0.4); }
+.model-info-val { color: #c4b5fd; font-weight: 600; }
+
+/* ── Budget bust ────────────────────────────────────────────── */
+.budget-bust-bar {
+  height: 10px;
+  border-radius: 99px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+  margin: 0.5rem 0;
+}
+
+.budget-bust-fill {
+  height: 100%;
+  border-radius: 99px;
+  transition: width 0.8s ease;
+}
+
+/* ── Loader / empty ─────────────────────────────────────────── */
+.nudge-loading, .nudge-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 2rem;
+  gap: 0.75rem;
+  text-align: center;
+  color: rgba(255,255,255,0.4);
+}
+
+.nudge-empty .empty-icon { font-size: 2.5rem; opacity: 0.3; }

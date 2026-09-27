@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import Sidebar from './Sidebar';
@@ -20,6 +20,7 @@ function GoalsManager() {
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const targetDateInputRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -158,6 +159,21 @@ function GoalsManager() {
     setErrors({});
   };
 
+  const handleOpenDatePicker = () => {
+    const input = targetDateInputRef.current;
+    if (!input) {
+      return;
+    }
+
+    if (typeof input.showPicker === 'function') {
+      input.showPicker();
+      return;
+    }
+
+    input.focus();
+    input.click();
+  };
+
   const getPriorityColor = (priority) => {
     switch (priority) {
       case 'high': return '#ef4444';
@@ -284,11 +300,21 @@ function GoalsManager() {
                       type="date"
                       id="target_date"
                       name="target_date"
+                      ref={targetDateInputRef}
                       value={formData.target_date}
                       onChange={handleChange}
-                      className={`w-full bg-[#0a0a0a] border ${errors.target_date ? 'border-danger-500/50' : 'border-white/10'} rounded-lg px-4 py-2.5 pl-10 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all`}
+                      className={`goals-date-input w-full bg-[#0a0a0a] border ${errors.target_date ? 'border-danger-500/50' : 'border-white/10'} rounded-lg px-4 py-2.5 pl-10 pr-10 text-sm text-white focus:outline-none focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/50 transition-all`}
                     />
-                    <iconify-icon icon="solar:calendar-linear" className="absolute left-3.5 top-3 text-white/30 group-focus-within:text-emerald-400 transition-colors text-lg"></iconify-icon>
+                    <iconify-icon icon="solar:calendar-linear" className="absolute left-3.5 top-3 text-white/30 group-focus-within:text-emerald-400 transition-colors text-lg pointer-events-none"></iconify-icon>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={handleOpenDatePicker}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 hover:border-emerald-500/40 transition-all flex items-center justify-center"
+                      aria-label="Open date picker"
+                    >
+                      <iconify-icon icon="solar:calendar-add-linear" className="text-white/60 text-base"></iconify-icon>
+                    </button>
                   </div>
                   {errors.target_date && (
                     <p className="text-[11px] text-danger-400 font-medium pl-1">{errors.target_date}</p>

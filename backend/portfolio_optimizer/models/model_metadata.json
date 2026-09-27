@@ -1,0 +1,83 @@
+{
+  "algorithm": "XGBoost",
+  "n_assets": 5,
+  "asset_names": [
+    "Equity_LargeCap",
+    "Equity_MidCap",
+    "Debt_ShortTerm",
+    "Gold",
+    "Fixed_Deposit"
+  ],
+  "cv_strategy": "TimeSeriesSplit(n_splits=5)",
+  "per_asset_metrics": {
+    "Equity_LargeCap": {
+      "r2": -0.2686,
+      "rmse_monthly": 0.055456,
+      "rmse_annual_pct": 19.211
+    },
+    "Equity_MidCap": {
+      "r2": -0.3578,
+      "rmse_monthly": 0.075086,
+      "rmse_annual_pct": 26.01
+    },
+    "Debt_ShortTerm": {
+      "r2": -0.4489,
+      "rmse_monthly": 0.007225,
+      "rmse_annual_pct": 2.503
+    },
+    "Gold": {
+      "r2": -0.059,
+      "rmse_monthly": 0.037786,
+      "rmse_annual_pct": 13.089
+    },
+    "Fixed_Deposit": {
+      "r2": -2.5327,
+      "rmse_monthly": 0.002897,
+      "rmse_annual_pct": 1.004
+    }
+  },
+  "top_features": [
+    {
+      "feature": "Fixed_Deposit_ret12m",
+      "importance": 0.0521
+    },
+    {
+      "feature": "Debt_ShortTerm_ret6m",
+      "importance": 0.0459
+    },
+    {
+      "feature": "Gold_sharpe3m",
+      "importance": 0.0435
+    },
+    {
+      "feature": "Gold_ret12m",
+      "importance": 0.0432
+    },
+    {
+      "feature": "Fixed_Deposit_ret6m",
+      "importance": 0.043
+    },
+    {
+      "feature": "Debt_ShortTerm_ret3m",
+      "importance": 0.0429
+    },
+    {
+      "feature": "Fixed_Deposit_sharpe3m",
+      "importance": 0.0424
+    },
+    {
+      "feature": "Equity_LargeCap_vol3m",
+      "importance": 0.0414
+    },
+    {
+      "feature": "Fixed_Deposit_ret3m",
+      "importance": 0.0395
+    },
+    {
+      "feature": "Gold_vol6m",
+      "importance": 0.039
+    }
+  ],
+  "overall_r2": -0.7334,
+  "overall_rmse_annual_pct": 12.363
+}

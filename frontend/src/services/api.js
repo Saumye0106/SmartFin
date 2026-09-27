@@ -940,6 +940,17 @@ const api = {
       throw new Error(errorMsg);
     }
   },
+
+  // ── Generic request helpers (used by Portfolio Optimizer + Nudge Engine) ──
+  async get(path) {
+    const response = await axios.get(`${API_BASE_URL}${path}`);
+    return response;
+  },
+
+  async post(path, data) {
+    const response = await axios.post(`${API_BASE_URL}${path}`, data);
+    return response;
+  },
 };
 
 

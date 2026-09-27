@@ -106,3 +106,9 @@
 .shadow-emerald-900\/30 {
   box-shadow: 0 10px 15px -3px rgba(6, 78, 59, 0.3);
 }
+
+/* Date picker visibility for dark input styles */
+.goals-date-input::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}

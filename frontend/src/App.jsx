@@ -17,6 +17,8 @@ import LoanManagementPage from './components/LoanManagementPage';
 import RetirementPlanner from './components/RetirementPlanner';
 import ChatAgent from './components/ChatAgent';
 import BudgetManager from './components/BudgetManager';
+import PortfolioOptimizer from './components/PortfolioOptimizer';
+import NudgeEngine from './components/NudgeEngine';
 
 // Wrapper component to use navigate hook
 function AppContent() {
@@ -256,6 +258,22 @@ function AppContent() {
             <ProtectedRoute>
               <ErrorBoundary fallbackMessage="Error loading AI assistant. Please try again.">
                 <ChatAgent />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
+
+          <Route path="/portfolio" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading portfolio optimizer. Please try again.">
+                <PortfolioOptimizer />
+              </ErrorBoundary>
+            </ProtectedRoute>
+          } />
+
+          <Route path="/nudges" element={
+            <ProtectedRoute>
+              <ErrorBoundary fallbackMessage="Error loading nudge engine. Please try again.">
+                <NudgeEngine />
               </ErrorBoundary>
             </ProtectedRoute>
           } />

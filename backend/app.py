@@ -86,6 +86,10 @@ from retirement_planning.api import retirement_bp
 from retirement_planning.migrations import RetirementPlanningMigrations
 from guidance_engine import PersonalizedGuidanceEngine
 
+# Import new ML core modules
+from portfolio_optimizer.api import portfolio_bp
+from nudge_engine.api import nudge_bp
+
 app = Flask(__name__)
 app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'smartfin-secret-key-change-in-production')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
@@ -3552,6 +3556,8 @@ def get_loan_metrics(user_id):
 
 # ==================== REGISTER BLUEPRINTS ====================
 app.register_blueprint(retirement_bp)
+app.register_blueprint(portfolio_bp)
+app.register_blueprint(nudge_bp)
 
 
 # ==================== RUN SERVER ====================
