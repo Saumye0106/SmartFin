@@ -307,8 +307,12 @@ def execute_tool(tool_name, tool_input, app_context):
         analyze_spending_patterns, generate_guidance,
         detect_anomalies, suggest_investments,
         get_db, row_to_dict, rows_to_list,
-        _current_month_string, _build_budget_summary,
-        _build_analysis_payload_from_summary, _run_prediction_analysis
+        _run_prediction_analysis
+    )
+    from budget.service import (
+        current_month_string as _current_month_string,
+        build_budget_summary as _build_budget_summary,
+        build_analysis_payload_from_summary as _build_analysis_payload_from_summary,
     )
     import pandas as pd
 
