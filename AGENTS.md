@@ -1,7 +1,7 @@
 ﻿# SmartFin — Agent Context File
-> **Last Updated:** 2026-09-21
+> **Last Updated:** 2026-09-28
 > **Purpose:** Master context document for any AI agent or IDE working on this project.
-> Always read this file first before making any changes. Always update the relevant sections after completing work.
+> Always read this file first before making any changes. Always update the relevant sections after completing work — and always update it again at the end of a session or after any significant change, even if the session isn't "done" with its broader task.
 
 ---
 
@@ -51,27 +51,44 @@ START_SMARTFIN.bat     # from workspace root — spawns both terminals + browser
 
 ## 3. Directory Structure
 
+> **⚠️ Branch note:** The `backend/` blueprint layout below (auth/, profile_management/, budget/, loans/, chat/, calculators/, legacy_scorer/, db_core.py) reflects the `refactor/app-blueprints` branch, not yet merged to `main`. If you're on `main`, `app.py` is still the pre-refactor 3600+ line monolith described in the old layout — check `git branch` / `git log` before assuming this structure is present. See section 14 item 6 and the change log for details.
+
 ```
 smartfin-copy/
 ├── backend/
-│   ├── app.py                          ← Main Flask app (3600+ lines), all routes registered here
+│   ├── app.py                          ← Flask app factory — config, CORS, DB init, blueprint registration ONLY (393 lines, zero @app.route left)
+│   ├── db_core.py                      ← Shared SQLite helpers (get_db, execute_query, row_to_dict, rows_to_list) used by every blueprint
 │   ├── auth.db                         ← SQLite database (users, expenses, loans, goals, etc.)
-│   ├── financial_health_scorer.py      ← OLD scorer — KEPT (not removed), rule-based heuristics
+│   ├── auth/api.py                     ← Blueprint: register/login/refresh/protected, email verification, password reset, Twilio OTP (16 routes)
+│   ├── profile_management/api.py       ← Blueprint: profile CRUD, picture upload/delete, goals CRUD (10 routes). Named _management to avoid shadowing stdlib `profile`
+│   ├── budget/
+│   │   ├── api.py                      ← Blueprint: monthly budget + expenses CRUD, summaries (8 routes)
+│   │   └── service.py                  ← Shared budget helpers (build_budget_summary, etc.) — also used by legacy_scorer and chat_agent
+│   ├── loans/api.py                    ← Blueprint: loan CRUD, payment recording/history, cached loan metrics (9 routes)
+│   ├── chat/
+│   │   ├── api.py                      ← Blueprint: AI chat agent endpoint + session list/history/rename/delete/clear (6 routes)
+│   │   └── service.py                  ← Session-id scoping, title generation, conversation persistence
+│   ├── calculators/api.py              ← Blueprint: SIP + lumpsum calculators (pure math, no DB/auth)
+│   ├── legacy_scorer/
+│   │   ├── model.py                    ← Loads enhanced_model.pkl at import time (model, feature_names, model_metadata)
+│   │   ├── service.py                  ← classify_score, analyze_spending_patterns, generate_guidance, detect_anomalies, suggest_investments, run_prediction_analysis
+│   │   └── api.py                      ← Blueprint: /, /api/predict, /api/predict/from-budget, /api/whatif, /api/model-info
+│   ├── financial_health_scorer.py      ← OLD standalone scorer module — KEPT (not removed), rule-based heuristics. Distinct from legacy_scorer/ package above
 │   ├── loan_metrics_engine.py          ← Loan EMI/amortization calculations
 │   ├── loan_history_service.py         ← Loan CRUD business logic
 │   ├── loan_data_serializer.py         ← Loan response formatting
-│   ├── chat_agent.py                   ← AWS Bedrock (Nova model) chat agent with tool-calling
+│   ├── chat_agent.py                   ← AWS Bedrock (Nova model) chat agent with tool-calling. `execute_tool()` lazily imports model/scoring helpers from `legacy_scorer.model`/`legacy_scorer.service` and budget helpers from `budget.service` — update these imports if those modules move again
 │   ├── guidance_engine.py              ← Rule-based + optional AI financial guidance
 │   ├── goals_service.py                ← Goals CRUD logic
 │   ├── profile_service.py              ← User profile management
 │   ├── risk_assessment_service.py      ← Risk scoring engine
 │   ├── twilio_service.py               ← SMS/OTP integration
-│   ├── validation_schemas.py           ← Marshmallow input validation
-│   ├── db_utils.py                     ← DB helpers
+│   ├── validation_schemas.py           ← Marshmallow input validation — has a known bug, see section 14 item 8
+│   ├── db_utils.py                     ← Loan-table-specific DB helpers (separate from db_core.py)
 │   ├── retirement_planning/            ← Isolated domain package for retirement workflows
 │   │   ├── api.py                      ← Blueprint at /api/retirement/
 │   │   └── migrations.py              ← Creates retirement DB tables on startup
-│   ├── portfolio_optimizer/            ← ✅ NEW ML Module #1 (Markowitz + XGBoost)
+│   ├── portfolio_optimizer/            ← ✅ ML Module #1 (Markowitz + XGBoost)
 │   │   ├── api.py                      ← Flask Blueprint at /api/portfolio/
 │   │   ├── data_loader.py              ← Generates Indian market monthly return series
 │   │   ├── return_predictor.py         ← XGBoost return prediction (one model per asset)
@@ -80,7 +97,7 @@ smartfin-copy/
 │   │   ├── train_model.py              ← Training script
 │   │   ├── data/asset_returns.csv      ← 84-month Indian market return series (GENERATED, not real)
 │   │   └── models/                     ← Trained XGBoost pkl + model_metadata.json
-│   └── nudge_engine/                   ← ✅ NEW ML Module #2 (Isolation Forest)
+│   └── nudge_engine/                   ← ✅ ML Module #2 (Isolation Forest)
 │       ├── api.py                      ← Flask Blueprint at /api/nudges/
 │       ├── feature_builder.py          ← Builds weekly expense feature matrix from DB
 │       ├── anomaly_detector.py         ← Per-user Isolation Forest + RF budget-bust classifier
@@ -447,8 +464,10 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 3. **Windows encoding** — use `python -X utf8` flag for any scripts with emoji characters.
 4. **Frontend Vite warning** — `default referenced in default didn't resolve at build time` is benign. Build still succeeds (683 modules, 0 errors).
 5. **Two `auth.db` files** — one at workspace root (stale/empty), one at `backend/auth.db`. Flask uses `backend/auth.db`. The root one is the empty one that should be deleted if it reappears.
-6. **app.py is monolithic** — 3600+ lines. All routes are in one file. Future improvement: split into modular blueprints.
+6. **app.py monolith — RESOLVED on `refactor/app-blueprints` branch, not yet merged to `main`.** All routes have been split into blueprints (auth, profile_management, budget, loans, chat, calculators, legacy_scorer) following the pattern retirement_planning/portfolio_optimizer/nudge_engine already used. `app.py` is now 393 lines of pure setup/wiring. If you're reading this from `main`, the split hasn't landed yet — check which branch you're on before assuming this structure exists. When merging, watch for: any lazy `from app import <name>` elsewhere in the codebase (e.g. `chat_agent.py`'s `execute_tool()`) that still points at a name that moved — this exact class of bug broke chat mid-refactor and was caught only by manually testing `/api/chat`, not by import checks alone.
 7. **`retirement_planning/` integration_manager.py** — imports `financial_health_scorer` internally. Do not delete `financial_health_scorer.py` without updating `integration_manager.py` first.
+8. **`validation_schemas.py` marshmallow bug** — `POST /api/profile/goals` (and likely other schema validators using the same pattern) throws `GoalCreateSchema.validate_future_date() got an unexpected keyword argument 'data_key'` — a marshmallow version mismatch (validator signature expects an older/newer marshmallow API). Confirmed present both before and after the blueprint refactor, so it's a pre-existing bug, not a regression. Not yet fixed.
+9. **IDE red squiggles on `flask`/`flask_jwt_extended` imports** — the editor's Python language server doesn't know packages live in `C:\Users\saumy\AppData\Roaming\Python\Python314\site-packages` (see item 1). Fixed via `.vscode/settings.json` → `"python.defaultInterpreterPath": "C:\\Python314\\python.exe"`. If squiggles persist, reload the window or run "Python: Select Interpreter" and pick that path manually. Purely cosmetic — doesn't affect running the app.
 
 ---
 
@@ -456,6 +475,8 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-09-28 | Claude Code (Sonnet 5) | Added `.vscode/settings.json` → `python.defaultInterpreterPath` pointing at `C:\Python314\python.exe`, to fix editor red-squiggles on Flask imports (cosmetic, no functional change) |
+| 2026-09-28 | Claude Code (Sonnet 5) | On branch `refactor/app-blueprints` (7 commits, not yet merged to `main`): split monolithic `app.py` (3600+ lines) into Flask blueprints — `auth` (16 routes), `profile_management` (10), `budget` (8), `loans` (9), `chat` (6), `calculators` (2), `legacy_scorer` (5) — plus shared `db_core.py`. `app.py` is now 393 lines, zero `@app.route` left. Every step verified with a live server boot + real curl round-trips, not just import checks. Caught and fixed a real regression mid-refactor: `chat_agent.py`'s lazy `from app import ...` in `execute_tool()` still referenced budget helpers by names the budget-blueprint commit had renamed/moved — fixed by pointing it at `budget.service` and, in the final commit, at `legacy_scorer.model`/`legacy_scorer.service` too. Also found (but did not fix) a pre-existing marshmallow bug in `POST /api/profile/goals` — see section 14 item 8 |
 | 2026-09-21 | Antigravity (Claude) | Merged all docs/ into AGENTS.md as legacy data, deleted docs/ tree |
 | 2026-09-21 | Antigravity (Claude) | Workspace cleanup — deleted ~60 files: aurabuildtemp/, stale docs/, backlog/, scripts/, applied migrations, debug test files, large raw CSVs (13 MB), orphaned frontend components, CLAUDE.md/.windsurfrules |
 | 2026-09-21 | Antigravity (Claude) | Created AGENTS.md context file |
