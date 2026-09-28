@@ -27,27 +27,39 @@ except ImportError:
 ASSET_NAMES = [
     "Equity_LargeCap",
     "Equity_MidCap",
+    "Equity_SmallCap",
+    "International_Equity",
     "Debt_ShortTerm",
     "Gold",
+    "Silver",
+    "REIT",
     "Fixed_Deposit",
 ]
 
 # Friendly display names
 DISPLAY_NAMES = {
-    "Equity_LargeCap": "Large-Cap Equity",
-    "Equity_MidCap":   "Mid-Cap Equity",
-    "Debt_ShortTerm":  "Short-Term Debt",
-    "Gold":            "Gold",
-    "Fixed_Deposit":   "Fixed Deposit",
+    "Equity_LargeCap":      "Large-Cap Equity",
+    "Equity_MidCap":        "Mid-Cap Equity",
+    "Equity_SmallCap":      "Small-Cap Equity",
+    "International_Equity": "International Equity (Nasdaq 100)",
+    "Debt_ShortTerm":       "Short-Term Debt",
+    "Gold":                 "Gold",
+    "Silver":               "Silver",
+    "REIT":                 "REIT (Real Estate)",
+    "Fixed_Deposit":        "Fixed Deposit",
 }
 
 # Category grouping for the frontend donut chart
 CATEGORY_MAP = {
-    "Equity_LargeCap": "Equity",
-    "Equity_MidCap":   "Equity",
-    "Debt_ShortTerm":  "Debt",
-    "Gold":            "Gold",
-    "Fixed_Deposit":   "FD / Cash",
+    "Equity_LargeCap":      "Equity",
+    "Equity_MidCap":        "Equity",
+    "Equity_SmallCap":      "Equity",
+    "International_Equity": "Equity",
+    "Debt_ShortTerm":       "Debt",
+    "Gold":                 "Precious Metals",
+    "Silver":               "Precious Metals",
+    "REIT":                 "Real Estate",
+    "Fixed_Deposit":        "FD / Cash",
 }
 
 
@@ -75,8 +87,17 @@ class MarkowitzEngine:
     def _validate(self):
         assert self.mu.shape == (self.n,), "mu shape mismatch"
         assert self.cov.shape == (self.n, self.n), "cov shape mismatch"
-        # Ensure PSD by adding small diagonal jitter
-        self.cov = self.cov + np.eye(self.n) * 1e-8
+        # Regularize toward strict positive-definiteness. A fixed 1e-8 jitter
+        # is negligible against real-data covariance scales (e.g. an asset
+        # like Fixed Deposit with exactly-zero real variance creates a true
+        # zero eigenvalue / singular matrix here) and leaves the QP flat
+        # along that null direction, which lets SLSQP's per-target-return
+        # frontier sweep land on different non-global local optima and
+        # break the frontier's monotonicity. Scale the jitter to the
+        # matrix's own eigenvalue range instead of a fixed absolute value.
+        eigvals = np.linalg.eigvalsh(self.cov)
+        jitter = max(1e-8, 1e-4 * float(np.max(eigvals)))
+        self.cov = self.cov + np.eye(self.n) * jitter
 
     @classmethod
     def from_return_series(cls, df: pd.DataFrame) -> "MarkowitzEngine":
@@ -136,9 +157,30 @@ class MarkowitzEngine:
         Returns:
             List of dicts: {return, risk, weights, sharpe}
         """
-        mu_min = self.mu.min()
+        # The efficient frontier is, by definition, only the upper branch of
+        # the mean-variance boundary — the set of portfolios where no other
+        # allocation gives a higher return for the same risk. Sweeping target
+        # returns from mu_min would also solve for the dominated LOWER branch
+        # (below the GMV return, risk actually *decreases* as target return
+        # rises toward the GMV point) and interleave both branches once
+        # sorted by risk, producing a jagged, non-monotonic plot. This was
+        # invisible with the old narrow-mu synthetic data (no negative-return
+        # assets, so the sweep never reached below GMV) but shows up once a
+        # real asset's ML-predicted return goes negative (e.g. Gold).
         mu_max = self.mu.max()
-        target_returns = np.linspace(mu_min * 1.02, mu_max * 0.98, n_points)
+        gmv_return = float(self.gmv_portfolio()["expected_return_annual"])
+        lower_bound = max(gmv_return, self.mu.min() * 1.02)
+        target_returns = np.linspace(lower_bound * 1.001 if lower_bound > 0 else lower_bound - 0.001,
+                                      mu_max * 0.98, n_points)
+
+        # Tolerance for how far the achieved return may drift from the target
+        # after clipping tiny numerical negatives and renormalizing. With a
+        # wide mu spread (e.g. noisy ML-predicted returns across many assets),
+        # SLSQP can report success on a solution whose constraint is only
+        # loosely satisfied; renormalizing then shifts the return enough to
+        # break the frontier's monotonicity if left unchecked.
+        return_range = max(mu_max - self.mu.min(), 1e-6)
+        max_drift = max(0.005, 0.01 * return_range)
 
         frontier = []
         for target in target_returns:
@@ -148,6 +190,10 @@ class MarkowitzEngine:
             w = np.clip(result.x, 0, 1)
             w /= w.sum()
             ret = self._portfolio_return(w)
+            if abs(ret - target) > max_drift:
+                # Renormalized weights drifted too far from the intended
+                # target return — discard rather than plot a distorted point.
+                continue
             std = self._portfolio_std(w)
             sharpe = (ret - 0.065) / (std + 1e-8)  # risk-free ≈ repo rate 6.5%
             frontier.append({

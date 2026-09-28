@@ -1,7 +1,9 @@
 ﻿# SmartFin — Agent Context File
-> **Last Updated:** 2026-09-21
+> **Last Updated:** 2026-09-29
 > **Purpose:** Master context document for any AI agent or IDE working on this project.
-> Always read this file first before making any changes. Always update the relevant sections after completing work.
+> Always read this file first before making any changes. Always update the relevant sections after completing work — and always update it again at the end of a session or after any significant change, even if the session isn't "done" with its broader task.
+
+> **Branch note:** this file's content reflects `feature/portfolio-real-data`, branched from `main` (not from `refactor/app-blueprints`, which has its own separate `app.py` blueprint-split changes and its own AGENTS.md updates not reflected here). Check `git branch`/`git log` before assuming which branch's state you're looking at — `app.py` here is still the pre-refactor monolith.
 
 ---
 
@@ -178,42 +180,50 @@ python data/train_enhanced_model.py  # from workspace root
 
 ---
 
-### Module 1: Portfolio Optimizer (NEW — Real ML)
+### Module 1: Portfolio Optimizer (Real market data via yfinance, 9-asset universe)
 
-**Files:** `backend/portfolio_optimizer/`  
+**Files:** `backend/portfolio_optimizer/`
 **API Blueprint:** `/api/portfolio/` (registered in `app.py`)
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/portfolio/optimize` | POST | Returns optimal allocation for given amount + risk score |
 | `/api/portfolio/frontier` | GET | Returns efficient frontier data points |
-| `/api/portfolio/model-info` | GET | Returns XGBoost metrics + feature importance |
+| `/api/portfolio/model-info` | GET | Returns XGBoost metrics + feature importance + data source |
 | `/api/portfolio/whatif` | POST | What-if scenario comparison |
 
-**Dataset:**
-- Source: Statistically generated using `data_loader.py` — calibrated to real 10-year Indian market benchmarks
-- 84 months (7 years) of monthly returns saved to `portfolio_optimizer/data/asset_returns.csv`
-- **⚠️ PENDING:** Switch to real `yfinance` data — user agreed, not yet done
+**Dataset — real, not synthetic:**
+- `fetch_real_data.py` pulls real daily closes via `yfinance` for 7 tradeable proxies, resampled to monthly returns. Each asset keeps its **own full available history** (not truncated to a shared window) — e.g. Nifty 50 goes back to 2007 (228 months) while newer ETFs only as far as they've been listed. Gaps before an asset's inception are left as `NaN`; pandas' `mean()`/`cov()`/`corr()` already skip NaN by default, so risk/return stats use each asset's full real history, and only the shared XGBoost feature matrix is bottlenecked to the common overlap window.
+- Common overlap window across all 9 assets (as of last fetch): **2024-07-31 to 2026-09-30** (~27 months) — set by Mid-Cap ETF's short listing history. Re-run `fetch_real_data.py` periodically; this window grows over time as the newer ETFs accumulate history.
+- `Fixed_Deposit` has no market price series (FDs aren't traded) — the only assumption-based column, flat 6.5%/year, clearly labeled as such in `data/data_source.json` and surfaced in the API/UI. All 8 other assets are real market data.
+- The synthetic Gaussian generator in `data_loader.py` (`generate_return_series()`) still exists as an offline fallback if `fetch_real_data.py` has never been run (e.g. fresh clone, no internet) — `get_data_source_info()` is the single source of truth for which one is actually in use, surfaced in every API response as `data_source.type` (`real_historical` vs `synthetic_fallback`).
 
-**Asset Classes:**
-1. Equity Large-Cap (Nifty 50 proxy): 12% annual return, 18% vol
-2. Equity Mid-Cap (Nifty Midcap proxy): 14% annual return, 22% vol
-3. Short-Term Debt (CRISIL proxy): 6.5% annual, 2% vol
-4. Gold (domestic INR): 8% annual, 14% vol
-5. Fixed Deposit: 6.5% annual, 0.5% vol
-
-**5×5 Correlation Matrix (empirical):** LargeCap–MidCap=0.85, Equity–Debt=-0.10, Debt–FD=0.70, Gold–Equity=0.05
+**Asset universe (9 assets, 5 categories):**
+| Asset | Category | Ticker | History (last fetch) |
+|---|---|---|---|
+| Equity Large-Cap | Equity | `^NSEI` (Nifty 50) | 2007-10 → present (228 mo) |
+| Equity Mid-Cap | Equity | `MIDCAPETF.NS` | 2024-07 → present (27 mo) |
+| Equity Small-Cap | Equity | `SMALLCAP.NS` | 2024-04 → present (30 mo) |
+| International Equity | Equity | `MON100.NS` (Nasdaq 100 ETF) | 2011-04 → present (186 mo) |
+| Short-Term Debt | Debt | `LIQUIDBEES.NS` | 2009-02 → present (212 mo) |
+| Gold | Precious Metals | `GOLDBEES.NS` | 2009-02 → present (212 mo) |
+| Silver | Precious Metals | `SILVERBEES.NS` | 2022-03 → present (55 mo) |
+| REIT | Real Estate | `EMBASSY.NS` (Embassy Office Parks REIT) | 2019-05 → present (89 mo) |
+| Fixed Deposit | FD / Cash | — (assumption-based) | full range |
 
 **Model:**
-- XGBoost Regressor (one model per asset class), TimeSeriesSplit CV (n_splits=5)
-- Features: rolling 3m/6m/12m returns, volatility, Sharpe ratio per asset
-- Overall R² = -0.73 (expected per Efficient Market Hypothesis — strong interview talking point)
-- Markowitz optimizer: `scipy.optimize.minimize` with SLSQP → returns GMV, Max-Sharpe, risk-score-matched portfolios
+- XGBoost Regressor, trained **independently per asset on that asset's own available history** (not one shared row-aligned matrix — see `return_predictor.py`'s module docstring for why: a shared matrix bottlenecks every asset to the newest asset's ~27-month window, which measured out to only 15 usable training rows total). Per-asset `TimeSeriesSplit` CV, `n_splits` scaled to available rows (2–5).
+- Assets with fewer than 20 usable rows after feature/target construction (Mid-Cap, Small-Cap — both real, just newly listed) are skipped for training; `predict()` falls back to that asset's own historical mean instead of a trained model. `Fixed_Deposit` is also skipped (constant target, zero variance — nothing for a model to learn).
+- As of last training: **6/9 assets trained**, overall R² = **-0.44** (genuinely negative now, not tautological — earlier synthetic-data version's R²=-0.73 was predicting noise from noise; this version predicts real next-month returns from real momentum/vol features and still can't beat the mean, a legitimate EMH result).
+- Markowitz optimizer: `scipy.optimize.minimize` with SLSQP → returns GMV, Max-Sharpe, risk-score-matched portfolios. Covariance matrix is regularized (jitter scaled to the matrix's own eigenvalue range, not a fixed `1e-8`) — `Fixed_Deposit`'s exactly-zero real variance creates a true zero eigenvalue otherwise, which let SLSQP land on different non-global optima across the frontier sweep and produce a jagged, non-monotonic chart. `efficient_frontier()` also only sweeps target returns from the GMV return upward (the true efficient/upper branch) — sweeping below GMV, as the old code did, computes the dominated lower branch instead, invisible with the old synthetic data (no negative-return assets) but exposed once Gold's real ML-predicted return went negative.
+- **Known limitation to watch:** the `ml_predicted` engine mode can produce extreme allocations/expected-returns (e.g. very high weight toward whichever asset has the best noisy predicted return, like Silver off only ~43 months of data) — a well-known "Markowitz is an error-maximizer" sensitivity to noisy inputs, not a bug. The `historical` engine mode (full real-history mean/cov, no ML predictions) is more stable if this becomes a UX concern; not yet addressed.
 
-**Training:**
+**Fetching real data / retraining:**
 ```bash
 cd backend
-python -X utf8 portfolio_optimizer/train_model.py
+python -X utf8 portfolio_optimizer/fetch_real_data.py   # fetch/refresh real data only
+python -X utf8 portfolio_optimizer/train_model.py        # train on whatever's cached
+python -X utf8 portfolio_optimizer/train_model.py --refresh-data  # fetch + train in one step
 ```
 
 ---
@@ -408,7 +418,8 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 
 ## 12. Pending Work (in priority order)
 
-- [ ] Fetch real Indian market data via `yfinance` (`^NSEI`, `GOLDBEES.NS`, `NIFTYMID50.NS`, `LIQUIDBEES.NS`) and retrain Portfolio Optimizer XGBoost
+- [x] ~~Fetch real Indian market data via `yfinance` and retrain Portfolio Optimizer XGBoost~~ — done, see §5 Module 1. 9-asset universe, common real overlap 2024-07 to present; re-run `fetch_real_data.py` periodically as newer ETFs accrue history.
+- [ ] Portfolio Optimizer: the `ml_predicted` engine mode is sensitive to noisy per-asset predictions from thin real history (e.g. Silver off ~43 months) and can produce extreme allocations — consider blending ML-predicted mu with historical mu, or defaulting to the more stable `historical` engine mode, if this becomes a UX complaint
 - [ ] Replace `MainDashboard.jsx` health score widget with Portfolio Summary card (optional)
 - [ ] Full removal of old scorer — `financial_health_scorer.py`, `ScoreDisplay.jsx`, `/api/predict` (optional)
 - [ ] Run `demo_seeder.py` for a real user account to populate Nudge Engine data
@@ -422,7 +433,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 > "We use a GradientBoosting Regressor trained on 52,424 records from two Kaggle datasets (global personal finance + India personal finance). The target labels are generated by an 8-factor rule-based formula we designed — savings behavior, debt burden, expense control, life stage, and loan metrics. The model learns to replicate that formula accurately. The key advantage: our scoring is fully transparent and explainable to users, while the ML layer enables fast generalization to new users without running the rule engine."
 
 ### Portfolio Optimizer Story
-> "The core optimization is Markowitz Mean-Variance (SLSQP), which finds the efficient frontier of Indian asset classes. XGBoost predicts next-period returns, but R²=-0.73 is expected under the Efficient Market Hypothesis — stocks are hard to predict. The model's real value is in momentum and volatility features that inform asset weight constraints, not in beating the market."
+> "The core optimization is Markowitz Mean-Variance (SLSQP) over 9 real asset classes — Nifty 50, Mid-Cap, Small-Cap, Nasdaq 100 (via an NSE-listed ETF), short-term debt, gold, silver, and a REIT, all fetched via yfinance, plus Fixed Deposit as the one openly-assumption-based column since FDs aren't traded. XGBoost predicts next-month returns per asset from its own real momentum/volatility history, and overall R²≈-0.44 — genuinely negative, consistent with the Efficient Market Hypothesis, not a tautology: earlier versions of this module used fabricated Gaussian-noise 'market data,' where a negative R² just meant noise can't predict noise. This version predicts real prices and still can't beat the mean, which is the actual EMH result. Two newly-listed assets (Mid-Cap, Small-Cap ETFs) don't have enough real history yet to train reliably, so they're transparently skipped and fall back to their historical mean — disclosed in the API and UI, not hidden."
 
 ### Nudge Engine Story
 > "Isolation Forest runs per-user on their own 16+ week spending history. It doesn't need labeled anomaly data — it learns each user's baseline by itself (unsupervised). A spending week that is very different from that user's personal pattern gets flagged, regardless of whether it's 'expensive' by some global standard."
@@ -447,8 +458,10 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 3. **Windows encoding** — use `python -X utf8` flag for any scripts with emoji characters.
 4. **Frontend Vite warning** — `default referenced in default didn't resolve at build time` is benign. Build still succeeds (683 modules, 0 errors).
 5. **Two `auth.db` files** — one at workspace root (stale/empty), one at `backend/auth.db`. Flask uses `backend/auth.db`. The root one is the empty one that should be deleted if it reappears.
-6. **app.py is monolithic** — 3600+ lines. All routes are in one file. Future improvement: split into modular blueprints.
+6. **app.py is monolithic** — 3600+ lines. All routes are in one file. Already split on the separate `refactor/app-blueprints` branch (not yet merged here) — see that branch's own AGENTS.md for details.
 7. **`retirement_planning/` integration_manager.py** — imports `financial_health_scorer` internally. Do not delete `financial_health_scorer.py` without updating `integration_manager.py` first.
+8. **`portfolio_optimizer/personalizer.py`'s DB queries reference a schema that doesn't match `auth.db`** — `_get_emi_ratio()`/`_get_savings_ratio()` query `users.income`/`users.emi`/`users.savings`, which don't exist on the `users` table (that data lives in `financial_goals`/`monthly_budgets`/`users_profile` — see §6 schema); `_get_active_loans_count()` queries `loans.status = 'active'` but the real column is `default_status`; `_get_shortest_goal_months()` queries a `goals` table that doesn't exist (the real table is `financial_goals`). Every one of these silently fails and is swallowed by a bare `try/except`, meaning all 4 personalization rules likely never fire in production — found while testing the portfolio optimizer's 9-asset expansion, not something that session introduced or fixed. The rule *logic* itself (which assets get shifted) was verified correct via mocked unit tests bypassing these broken DB calls; the DB integration itself needs a real fix (point the queries at the actual schema) before personalization can work end-to-end.
+9. **Portfolio Optimizer `ml_predicted` engine sensitivity** — see §5 Module 1's "Known limitation to watch."
 
 ---
 
@@ -456,6 +469,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-09-29 | Claude Code (Sonnet 5) | On branch `feature/portfolio-real-data` (branched from `main`): replaced the Portfolio Optimizer's fully-fabricated Gaussian-noise data with real historical market data via `yfinance`, and expanded the asset universe from 5 to 9 (added Small-Cap Equity, International Equity via Nasdaq-100 ETF, Silver, REIT). New: `fetch_real_data.py`. Rewrote `return_predictor.py` to train each asset independently on its own real history (a shared matrix would have bottlenecked all 9 assets to ~15 training rows total, driven by the newest-listed ETF). Fixed two real numerical bugs surfaced by the wider real-data mu range: (1) the efficient frontier swept target returns below the GMV return, incorrectly including the dominated lower branch of the mean-variance boundary and producing a jagged, non-monotonic chart — fixed by only sweeping from GMV upward, the correct definition of "efficient frontier"; (2) the covariance matrix's fixed `1e-8` regularization jitter was 6+ orders of magnitude too small against real covariance scales, so `Fixed_Deposit`'s exactly-zero real variance created a true singular direction that let SLSQP land on different non-global optima across the frontier sweep — fixed by scaling the jitter to the matrix's own eigenvalue range. Extended `personalizer.py`'s 4 rules to cover the new asset buckets (verified via mocked unit tests) and found, but did not fix, a separate pre-existing bug: `personalizer.py`'s DB queries reference a schema that doesn't match `auth.db`, so all 4 rules likely never fire in production (see §14 item 8). Verified end-to-end via live server + curl on all 4 endpoints, a Playwright visual check of the actual UI (screenshots, zero console errors), and a full frontend production build. |
 | 2026-09-21 | Antigravity (Claude) | Merged all docs/ into AGENTS.md as legacy data, deleted docs/ tree |
 | 2026-09-21 | Antigravity (Claude) | Workspace cleanup — deleted ~60 files: aurabuildtemp/, stale docs/, backlog/, scripts/, applied migrations, debug test files, large raw CSVs (13 MB), orphaned frontend components, CLAUDE.md/.windsurfrules |
 | 2026-09-21 | Antigravity (Claude) | Created AGENTS.md context file |

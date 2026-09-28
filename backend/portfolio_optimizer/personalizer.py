@@ -21,10 +21,21 @@ import numpy as np
 ASSET_NAMES = [
     "Equity_LargeCap",
     "Equity_MidCap",
+    "Equity_SmallCap",
+    "International_Equity",
     "Debt_ShortTerm",
     "Gold",
+    "Silver",
+    "REIT",
     "Fixed_Deposit",
 ]
+
+# Same-role groupings used to extend the rules below to the expanded asset
+# universe: "reduce equity" nudges should pull from ALL equity buckets, not
+# just the original two, and "reduce risk/illiquid" nudges should pull from
+# Gold's new sibling assets too.
+_EQUITY_ASSETS = ["Equity_LargeCap", "Equity_MidCap", "Equity_SmallCap", "International_Equity"]
+_RISKY_NONEQUITY_ASSETS = ["Gold", "Silver", "REIT"]
 
 
 class Personalizer:
@@ -146,37 +157,39 @@ class Personalizer:
         min_goal_months = self._get_shortest_goal_months(user_id)
         savings_ratio = self._get_savings_ratio(user_id)
 
-        # Rule 1: High EMI burden → reduce equity, increase FD/Debt
+        # Rule 1: High EMI burden → reduce equity (across ALL equity buckets), increase FD/Debt
         if emi_ratio is not None and emi_ratio > 0.40:
-            weights = self._shift(weights, from_assets=["Equity_LargeCap", "Equity_MidCap"],
+            weights = self._shift(weights, from_assets=_EQUITY_ASSETS,
                                   to_assets=["Fixed_Deposit", "Debt_ShortTerm"], amount=0.10)
             applied.append("high_emi_reduced_equity")
 
         elif emi_ratio is not None and emi_ratio > 0.25:
-            weights = self._shift(weights, from_assets=["Equity_MidCap"],
+            weights = self._shift(weights, from_assets=["Equity_MidCap", "Equity_SmallCap"],
                                   to_assets=["Debt_ShortTerm"], amount=0.05)
             applied.append("moderate_emi_reduced_midcap")
 
-        # Rule 2: Active loans → add a liquidity buffer in FD
+        # Rule 2: Active loans → add a liquidity buffer in FD (pull from mid-cap
+        # and the higher-volatility non-equity assets: Gold/Silver/REIT)
         if active_loans >= 2:
-            weights = self._shift(weights, from_assets=["Equity_MidCap", "Gold"],
+            weights = self._shift(weights, from_assets=["Equity_MidCap"] + _RISKY_NONEQUITY_ASSETS,
                                   to_assets=["Fixed_Deposit"], amount=0.05)
             applied.append("multiple_loans_liquidity_buffer")
 
-        # Rule 3: Short-term goal ≤ 12 months → heavily debt-biased
+        # Rule 3: Short-term goal ≤ 12 months → heavily debt-biased (all equity reduced)
         if min_goal_months is not None and min_goal_months <= 12:
-            weights = self._shift(weights, from_assets=["Equity_LargeCap", "Equity_MidCap"],
+            weights = self._shift(weights, from_assets=_EQUITY_ASSETS,
                                   to_assets=["Debt_ShortTerm", "Fixed_Deposit"], amount=0.15)
             applied.append(f"short_term_goal_{int(min_goal_months)}mo_shifted_debt")
 
         elif min_goal_months is not None and min_goal_months <= 36:
-            weights = self._shift(weights, from_assets=["Equity_MidCap"],
+            weights = self._shift(weights, from_assets=["Equity_MidCap", "Equity_SmallCap"],
                                   to_assets=["Debt_ShortTerm"], amount=0.08)
             applied.append(f"medium_term_goal_{int(min_goal_months)}mo_shifted_debt")
 
         # Rule 4: Very low savings → don't invest in volatile assets
+        # (mid/small-cap equity plus the higher-volatility non-equity assets)
         if savings_ratio is not None and savings_ratio < 0.05:
-            weights = self._shift(weights, from_assets=["Equity_MidCap", "Gold"],
+            weights = self._shift(weights, from_assets=["Equity_MidCap", "Equity_SmallCap"] + _RISKY_NONEQUITY_ASSETS,
                                   to_assets=["Fixed_Deposit"], amount=0.10)
             applied.append("low_savings_rate_conservative_shift")
 
