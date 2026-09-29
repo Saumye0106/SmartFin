@@ -8,9 +8,24 @@ import os
 from typing import Optional, List, Dict, Any, Tuple
 
 
+LOAN_TABLES = ('loans', 'loan_payments', 'loan_metrics')
+
+
 def get_db_path() -> str:
     """Get the absolute path to the database file"""
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth.db')
+
+
+def _safe_table_identifier(table: str) -> str:
+    """
+    Validate a table name against LOAN_TABLES and return it quoted for SQL.
+
+    Identifiers can't be bound as ? parameters, so any query that interpolates
+    a table name must go through this check to stay injection-safe.
+    """
+    if table not in LOAN_TABLES:
+        raise ValueError(f"Unknown table: {table!r}")
+    return f'"{table}"'
 
 
 def init_loan_tables(db_path: Optional[str] = None) -> None:
@@ -124,13 +139,12 @@ def verify_loan_tables(db_path: Optional[str] = None) -> Dict[str, Any]:
     
     try:
         # Check tables
-        expected_tables = ['loans', 'loan_payments', 'loan_metrics']
-        for table in expected_tables:
-            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+        for table in LOAN_TABLES:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
             exists = cursor.fetchone() is not None
-            
+
             if exists:
-                cursor.execute(f"PRAGMA table_info({table})")
+                cursor.execute(f"PRAGMA table_info({_safe_table_identifier(table)})")
                 columns = cursor.fetchall()
                 results['tables'][table] = {
                     'exists': True,
@@ -229,9 +243,8 @@ def get_loan_table_stats(db_path: Optional[str] = None) -> Dict[str, int]:
     stats = {}
     
     try:
-        tables = ['loans', 'loan_payments', 'loan_metrics']
-        for table in tables:
-            cursor.execute(f"SELECT COUNT(*) FROM {table}")
+        for table in LOAN_TABLES:
+            cursor.execute(f"SELECT COUNT(*) FROM {_safe_table_identifier(table)}")
             count = cursor.fetchone()[0]
             stats[table] = count
     finally:

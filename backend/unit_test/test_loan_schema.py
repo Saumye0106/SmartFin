@@ -13,7 +13,7 @@ import uuid
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db_utils import init_loan_tables, verify_loan_tables, get_loan_table_stats
+from db_utils import init_loan_tables, verify_loan_tables, get_loan_table_stats, _safe_table_identifier
 
 
 @pytest.fixture
@@ -349,6 +349,13 @@ def test_indexes_created(test_db):
     
     for idx in expected_indexes:
         assert idx in results['indexes'], f"Index {idx} not found"
+
+
+def test_safe_table_identifier_rejects_non_allowlisted_names():
+    assert _safe_table_identifier('loans') == '"loans"'
+    for bad in ['users', 'loans; DROP TABLE users; --', 'loans"--', '']:
+        with pytest.raises(ValueError):
+            _safe_table_identifier(bad)
 
 
 if __name__ == '__main__':

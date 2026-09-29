@@ -1,5 +1,5 @@
 ﻿# SmartFin — Agent Context File
-> **Last Updated:** 2026-09-28
+> **Last Updated:** 2026-09-30
 > **Purpose:** Master context document for any AI agent or IDE working on this project.
 > Always read this file first before making any changes. Always update the relevant sections after completing work — and always update it again at the end of a session or after any significant change, even if the session isn't "done" with its broader task.
 
@@ -84,7 +84,7 @@ smartfin-copy/
 │   ├── risk_assessment_service.py      ← Risk scoring engine
 │   ├── twilio_service.py               ← SMS/OTP integration
 │   ├── validation_schemas.py           ← Marshmallow input validation — has a known bug, see section 14 item 8
-│   ├── db_utils.py                     ← Loan-table-specific DB helpers (separate from db_core.py)
+│   ├── db_utils.py                     ← Loan-table-specific DB helpers (separate from db_core.py). Any SQL that interpolates a table name must go through `_safe_table_identifier()` (allowlist: `LOAN_TABLES`)
 │   ├── retirement_planning/            ← Isolated domain package for retirement workflows
 │   │   ├── api.py                      ← Blueprint at /api/retirement/
 │   │   └── migrations.py              ← Creates retirement DB tables on startup
@@ -451,6 +451,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 | Why SQLite? | Zero admin overhead, easy local setup, sufficient for prototyping persistent relational workflows |
 | Why GradientBoosting? | Handles non-linear financial relationships, robust to missing data, excellent feature importance analysis |
 | How is security handled? | JWT auth, hashed passwords (werkzeug/bcrypt), protected routes, ownership checks, OTP/email verification |
+| How do you prevent SQL injection? | Every query with user input uses `?` parameter binding, so values never become SQL. The few dynamically built queries only interpolate fixed column literals or `?` placeholder lists. Table names (which can't be bound) go through an allowlist check, `_safe_table_identifier()` in `db_utils.py`. Inputs are also type-cast (`float`/`int`/`strptime`), categories are allowlisted, and every update/delete is scoped with `AND user_id = ?` |
 | How does what-if work? | Backend predicts both current and modified scenarios, returns score delta and impact label |
 | How is explainability addressed? | Return classification labels, financial ratios, warnings, and guidance alongside prediction |
 | Is this just ML demo? | No — complete user journey: auth, profile, budget, loans, goals, retirement planner, AI chat assistant |
@@ -475,6 +476,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-09-30 | Claude Code (Opus 5.5) | SQL-injection audit of the whole backend: no live risk (all user input uses `?` binding; see the Q&A row in §13). Hardened the one theoretical gap: the `db_utils.py` helpers interpolated table names into SQL with f-strings (safe only because the names were hardcoded). Added a `LOAN_TABLES` allowlist and a `_safe_table_identifier()` validator that raises on anything else, plus a regression test in `unit_test/test_loan_schema.py` (12/12 pass). Installed `pytest==8.3.4`, which was already in requirements.txt but missing locally |
 | 2026-09-28 | Claude Code (Sonnet 5) | Added `.vscode/settings.json` → `python.defaultInterpreterPath` pointing at `C:\Python314\python.exe`, to fix editor red-squiggles on Flask imports (cosmetic, no functional change) |
 | 2026-09-28 | Claude Code (Sonnet 5) | On branch `refactor/app-blueprints` (7 commits, not yet merged to `main`): split monolithic `app.py` (3600+ lines) into Flask blueprints — `auth` (16 routes), `profile_management` (10), `budget` (8), `loans` (9), `chat` (6), `calculators` (2), `legacy_scorer` (5) — plus shared `db_core.py`. `app.py` is now 393 lines, zero `@app.route` left. Every step verified with a live server boot + real curl round-trips, not just import checks. Caught and fixed a real regression mid-refactor: `chat_agent.py`'s lazy `from app import ...` in `execute_tool()` still referenced budget helpers by names the budget-blueprint commit had renamed/moved — fixed by pointing it at `budget.service` and, in the final commit, at `legacy_scorer.model`/`legacy_scorer.service` too. Also found (but did not fix) a pre-existing marshmallow bug in `POST /api/profile/goals` — see section 14 item 8 |
 | 2026-09-21 | Antigravity (Claude) | Merged all docs/ into AGENTS.md as legacy data, deleted docs/ tree |
