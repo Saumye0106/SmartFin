@@ -393,6 +393,15 @@ export default function PortfolioOptimizer() {
                   </div>
                 </div>
 
+                {modelMeta.blend && (
+                  <div style={{ fontSize: '0.76rem', color: 'rgba(255,255,255,0.55)', marginBottom: '0.6rem' }}>
+                    ML influence on expected returns: {(modelMeta.blend.avg_ml_weight * 100).toFixed(0)}%
+                    {modelMeta.blend.avg_ml_weight === 0 && (
+                      <> — no model beats its asset's historical average out-of-sample (R² ≤ 0), so allocations use real historical returns</>
+                    )}
+                  </div>
+                )}
+
                 {modelMeta.skipped_assets?.length > 0 && (
                   <div style={{ fontSize: '0.76rem', color: 'rgba(255,255,255,0.45)', marginBottom: '0.75rem' }}>
                     Skipped (not enough real history yet, using historical average instead): {' '}
@@ -471,7 +480,11 @@ export default function PortfolioOptimizer() {
                 <div className="stat-chip">
                   <span className="chip-label">Engine</span>
                   <span className="chip-value" style={{ fontSize: '0.85rem' }}>
-                    {portfolio.engine === 'ml_predicted' ? '🤖 ML' : '📈 Historical'}
+                    {(() => {
+                      if (portfolio.engine !== 'ml_predicted') return '📈 Historical';
+                      const w = portfolio.model_metadata?.blend?.avg_ml_weight ?? 0;
+                      return w > 0 ? `🤖 ML blend (${(w * 100).toFixed(0)}%)` : '📈 Historical avg';
+                    })()}
                   </span>
                 </div>
                 <div className="stat-chip">

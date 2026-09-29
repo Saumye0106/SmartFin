@@ -63,6 +63,13 @@ CATEGORY_MAP = {
 }
 
 
+# Cap on any single asset's weight. Mean-variance optimization concentrates
+# heavily in whichever asset has the most overstated expected return; a cap
+# keeps allocations diversified even when an input estimate is noisy.
+MAX_ASSET_WEIGHT = 0.35
+UNCAPPED_ASSETS = {"Fixed_Deposit"}
+
+
 class MarkowitzEngine:
     """
     Markowitz Mean-Variance Optimizer for Indian retail asset classes.
@@ -73,16 +80,22 @@ class MarkowitzEngine:
         portfolio = engine.optimal_for_risk_score(risk_score=6)
     """
 
-    def __init__(self, mu_annual: np.ndarray, cov_annual: np.ndarray):
+    def __init__(self, mu_annual: np.ndarray, cov_annual: np.ndarray,
+                 max_weight: float = MAX_ASSET_WEIGHT):
         """
         Args:
             mu_annual: Expected annual returns vector, shape (n_assets,)
             cov_annual: Annual covariance matrix, shape (n_assets, n_assets)
+            max_weight: Per-asset allocation cap (assets in UNCAPPED_ASSETS
+                are exempt so conservative portfolios can still hold mostly cash)
         """
         self.mu = mu_annual
         self.cov = cov_annual
         self.n = len(mu_annual)
         self._validate()
+        names = ASSET_NAMES if self.n == len(ASSET_NAMES) else [None] * self.n
+        self.bounds = [(0.0, 1.0) if name in UNCAPPED_ASSETS else (0.0, max_weight)
+                       for name in names]
 
     def _validate(self):
         assert self.mu.shape == (self.n,), "mu shape mismatch"
@@ -122,6 +135,18 @@ class MarkowitzEngine:
     def _portfolio_return(self, w: np.ndarray) -> float:
         return float(w @ self.mu)
 
+    def _max_feasible_return(self) -> float:
+        """Highest portfolio return reachable under the per-asset weight caps."""
+        remaining = 1.0
+        total = 0.0
+        for i in np.argsort(-self.mu):
+            take = min(self.bounds[i][1], remaining)
+            total += take * self.mu[i]
+            remaining -= take
+            if remaining <= 1e-12:
+                break
+        return float(total)
+
     def _portfolio_std(self, w: np.ndarray) -> float:
         return float(np.sqrt(self._portfolio_variance(w)))
 
@@ -134,7 +159,7 @@ class MarkowitzEngine:
             {"type": "eq", "fun": lambda w: w.sum() - 1},
             {"type": "eq", "fun": lambda w: w @ self.mu - target_return},
         ]
-        bounds = [(0, 1)] * self.n
+        bounds = self.bounds
         w0 = np.ones(self.n) / self.n
 
         result = minimize(
@@ -167,7 +192,7 @@ class MarkowitzEngine:
         # invisible with the old narrow-mu synthetic data (no negative-return
         # assets, so the sweep never reached below GMV) but shows up once a
         # real asset's ML-predicted return goes negative (e.g. Gold).
-        mu_max = self.mu.max()
+        mu_max = self._max_feasible_return()
         gmv_return = float(self.gmv_portfolio()["expected_return_annual"])
         lower_bound = max(gmv_return, self.mu.min() * 1.02)
         target_returns = np.linspace(lower_bound * 1.001 if lower_bound > 0 else lower_bound - 0.001,
@@ -219,7 +244,7 @@ class MarkowitzEngine:
                 self._portfolio_variance,
                 np.ones(self.n) / self.n,
                 method="SLSQP",
-                bounds=[(0, 1)] * self.n,
+                bounds=self.bounds,
                 constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1}],
                 options={"ftol": 1e-12, "maxiter": 500},
             )
@@ -244,7 +269,7 @@ class MarkowitzEngine:
                 neg_sharpe,
                 np.ones(self.n) / self.n,
                 method="SLSQP",
-                bounds=[(0, 1)] * self.n,
+                bounds=self.bounds,
                 constraints=[{"type": "eq", "fun": lambda w: w.sum() - 1}],
                 options={"ftol": 1e-12, "maxiter": 500},
             )

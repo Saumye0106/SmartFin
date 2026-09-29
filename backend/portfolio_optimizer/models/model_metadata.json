@@ -37,7 +37,8 @@
         "end": "2026-08-31",
         "usable_rows": 216
       },
-      "cv_splits": 5
+      "cv_splits": 5,
+      "ml_weight": 0.0
     },
     "Equity_MidCap": {
       "status": "insufficient_data",
@@ -61,7 +62,8 @@
         "end": "2026-08-31",
         "usable_rows": 174
       },
-      "cv_splits": 5
+      "cv_splits": 5,
+      "ml_weight": 0.0
     },
     "Debt_ShortTerm": {
       "status": "trained",
@@ -73,7 +75,8 @@
         "end": "2026-08-31",
         "usable_rows": 200
       },
-      "cv_splits": 5
+      "cv_splits": 5,
+      "ml_weight": 0.0
     },
     "Gold": {
       "status": "trained",
@@ -85,7 +88,8 @@
         "end": "2026-08-31",
         "usable_rows": 200
       },
-      "cv_splits": 5
+      "cv_splits": 5,
+      "ml_weight": 0.0
     },
     "Silver": {
       "status": "trained",
@@ -97,7 +101,8 @@
         "end": "2026-08-31",
         "usable_rows": 43
       },
-      "cv_splits": 5
+      "cv_splits": 5,
+      "ml_weight": 0.0
     },
     "REIT": {
       "status": "trained",
@@ -109,7 +114,8 @@
         "end": "2026-08-31",
         "usable_rows": 77
       },
-      "cv_splits": 5
+      "cv_splits": 5,
+      "ml_weight": 0.0
     },
     "Fixed_Deposit": {
       "status": "constant_target",
@@ -143,5 +149,10 @@
     }
   ],
   "overall_r2": -0.4384,
-  "overall_rmse_annual_pct": 22.018
+  "overall_rmse_annual_pct": 22.018,
+  "blend": {
+    "formula": "expected_return = w * ml_prediction + (1 - w) * historical_mean",
+    "w_rule": "w = clip(out_of_fold_R2, 0, 1) * min(1, training_months / 120)",
+    "avg_ml_weight": 0.0
+  }
 }
