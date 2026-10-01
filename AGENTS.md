@@ -472,6 +472,8 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 3. **Present-Bias Score** — behavioural finance from transaction timing: share of discretionary spend in the 7 days after income lands, balance-drain speed → a per-user impatience score; time nudges to it (e.g. day 2 after payday). Natural novelty angle for the Nudge Engine.
 4. **Tax-aware portfolio (India)** — old vs new regime, 80C/ELSS limit, ₹1.25L LTCG exemption harvesting in the optimizer. Practical; less novel since tax calculators exist.
 
+**Standalone app ideas** (not tied to SmartFin's modules; each could be its own app): see [`STANDALONE_APP_IDEAS.md`](STANDALONE_APP_IDEAS.md). These are the No-Cost EMI / BNPL true-cost decoder *(top pick)*, the finfluencer & investment-scam checker (SEBI registry), the loan/insurance fine-print analyzer, and group expense settlement.
+
 ---
 
 ## 13. Interview / Presentation Talking Points
