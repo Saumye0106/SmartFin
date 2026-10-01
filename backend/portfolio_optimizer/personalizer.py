@@ -11,11 +11,15 @@ when the user is in a strong financial position.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+from contextlib import closing
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 ASSET_NAMES = [
@@ -50,81 +54,92 @@ class Personalizer:
         return conn
 
     # ── Data fetchers ─────────────────────────────────────────────────────
+    # On DB errors each fetcher returns "no adjustment" so optimization still
+    # works, but logs it: a silent `except: pass` once hid broken queries here.
+
+    def _latest_budget(self, conn, user_id: int) -> Optional[sqlite3.Row]:
+        """Most recent month the user recorded a positive income for."""
+        return conn.execute(
+            "SELECT month, monthly_income FROM monthly_budgets "
+            "WHERE user_id = ? AND monthly_income > 0 ORDER BY month DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
 
     def _get_emi_ratio(self, user_id: int) -> Optional[float]:
-        """Return EMI / income ratio from the user's profile."""
+        """Total EMI of active loans / latest monthly income from the budget tracker."""
         try:
-            conn = self._get_conn()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT income, emi FROM users WHERE id = ?", (user_id,)
-            )
-            row = cur.fetchone()
-            conn.close()
-            if row and row["income"] and row["income"] > 0:
-                emi = row["emi"] or 0
-                return emi / row["income"]
-        except Exception:
-            pass
-        return None
-
-    def _get_active_loans_count(self, user_id: int) -> int:
-        """Return number of active loans."""
-        try:
-            conn = self._get_conn()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT COUNT(*) as cnt FROM loans WHERE user_id = ? AND status = 'active'",
-                (user_id,),
-            )
-            row = cur.fetchone()
-            conn.close()
-            return row["cnt"] if row else 0
-        except Exception:
-            return 0
-
-    def _get_shortest_goal_months(self, user_id: int) -> Optional[int]:
-        """Return months to the nearest active financial goal deadline."""
-        try:
-            conn = self._get_conn()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT target_date FROM goals WHERE user_id = ? AND status = 'active'",
-                (user_id,),
-            )
-            rows = cur.fetchall()
-            conn.close()
-            now = datetime.utcnow()
-            months_list = []
-            for row in rows:
-                if row["target_date"]:
-                    try:
-                        td = datetime.fromisoformat(row["target_date"].replace("Z", ""))
-                        delta = (td - now).days / 30
-                        if delta > 0:
-                            months_list.append(delta)
-                    except Exception:
-                        pass
-            return min(months_list) if months_list else None
-        except Exception:
+            with closing(self._get_conn()) as conn:
+                budget = self._latest_budget(conn, user_id)
+                if not budget:
+                    return None
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(monthly_emi), 0) AS emi FROM loans "
+                    "WHERE user_id = ? AND deleted_at IS NULL "
+                    "AND (loan_maturity_date IS NULL OR loan_maturity_date >= date('now'))",
+                    (user_id,),
+                ).fetchone()
+                return row["emi"] / budget["monthly_income"]
+        except sqlite3.Error as e:
+            logger.warning("personalizer: EMI ratio lookup failed for user %s: %s", user_id, e)
             return None
 
-    def _get_savings_ratio(self, user_id: int) -> Optional[float]:
-        """Return monthly savings / income ratio."""
+    def _get_active_loans_count(self, user_id: int) -> int:
+        """Loans not deleted and not yet past maturity."""
         try:
-            conn = self._get_conn()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT income, savings FROM users WHERE id = ?", (user_id,)
-            )
-            row = cur.fetchone()
-            conn.close()
-            if row and row["income"] and row["income"] > 0:
-                savings = row["savings"] or 0
-                return savings / row["income"]
-        except Exception:
-            pass
-        return None
+            with closing(self._get_conn()) as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM loans "
+                    "WHERE user_id = ? AND deleted_at IS NULL "
+                    "AND (loan_maturity_date IS NULL OR loan_maturity_date >= date('now'))",
+                    (user_id,),
+                ).fetchone()
+                return row["cnt"]
+        except sqlite3.Error as e:
+            logger.warning("personalizer: active loan count failed for user %s: %s", user_id, e)
+            return 0
+
+    def _get_shortest_goal_months(self, user_id: int) -> Optional[float]:
+        """Months until the nearest active financial goal's target date."""
+        try:
+            with closing(self._get_conn()) as conn:
+                rows = conn.execute(
+                    "SELECT target_date FROM financial_goals "
+                    "WHERE user_id = ? AND status = 'active' AND target_date IS NOT NULL",
+                    (user_id,),
+                ).fetchall()
+        except sqlite3.Error as e:
+            logger.warning("personalizer: goal lookup failed for user %s: %s", user_id, e)
+            return None
+
+        now = datetime.now()
+        months_list = []
+        for row in rows:
+            try:
+                td = datetime.fromisoformat(str(row["target_date"]).replace("Z", ""))
+            except ValueError:
+                continue
+            delta = (td - now).days / 30
+            if delta > 0:
+                months_list.append(delta)
+        return min(months_list) if months_list else None
+
+    def _get_savings_ratio(self, user_id: int) -> Optional[float]:
+        """(income - recorded expenses) / income for the latest budget month."""
+        try:
+            with closing(self._get_conn()) as conn:
+                budget = self._latest_budget(conn, user_id)
+                if not budget:
+                    return None
+                row = conn.execute(
+                    "SELECT COALESCE(SUM(amount), 0) AS spent FROM expense_entries "
+                    "WHERE user_id = ? AND substr(expense_date, 1, 7) = ?",
+                    (user_id, budget["month"]),
+                ).fetchone()
+                income = budget["monthly_income"]
+                return (income - row["spent"]) / income
+        except sqlite3.Error as e:
+            logger.warning("personalizer: savings ratio lookup failed for user %s: %s", user_id, e)
+            return None
 
     # ── Adjustment logic ──────────────────────────────────────────────────
 
