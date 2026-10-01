@@ -7,6 +7,8 @@ from marshmallow import Schema, fields, validate, validates, ValidationError
 from datetime import date
 import re
 
+# @validates methods take **kwargs: marshmallow 4 passes data_key=..., marshmallow 3 doesn't.
+
 
 class ProfileCreateSchema(Schema):
     """Schema for creating a new user profile"""
@@ -44,7 +46,7 @@ class ProfileCreateSchema(Schema):
     notification_preferences = fields.Dict(allow_none=True)
     
     @validates('notification_preferences')
-    def validate_notification_preferences(self, value):
+    def validate_notification_preferences(self, value, **kwargs):
         """Validate notification preferences structure"""
         if value is None:
             return
@@ -89,7 +91,7 @@ class ProfileUpdateSchema(Schema):
     notification_preferences = fields.Dict()
     
     @validates('notification_preferences')
-    def validate_notification_preferences(self, value):
+    def validate_notification_preferences(self, value, **kwargs):
         """Validate notification preferences structure"""
         if value is None:
             return
@@ -135,7 +137,7 @@ class GoalCreateSchema(Schema):
     )
     
     @validates('target_date')
-    def validate_future_date(self, value):
+    def validate_future_date(self, value, **kwargs):
         """Ensure target date is in the future"""
         if value <= date.today():
             raise ValidationError('Target date must be in the future')
@@ -170,7 +172,7 @@ class GoalUpdateSchema(Schema):
     )
     
     @validates('target_date')
-    def validate_future_date(self, value):
+    def validate_future_date(self, value, **kwargs):
         """Ensure target date is in the future (if provided)"""
         if value and value <= date.today():
             raise ValidationError('Target date must be in the future')
