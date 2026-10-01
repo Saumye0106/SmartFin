@@ -463,6 +463,15 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - [ ] Run `demo_seeder.py` for a real user account to populate Nudge Engine data
 - [ ] End-to-end test: login → /portfolio → set amount + risk → verify donut chart renders
 
+### Feature ideas backlog (novelty — saved 2026-10-02, none started)
+
+The project's unique asset is that one app holds a user's **real** spending, loans, goals and investments together. These ideas exploit that:
+
+1. **Personal Inflation Rate** *(top pick)* — weight MOSPI CPI category sub-indices (food, housing, education, transport, …) by the user's own `expense_entries` category shares → "your inflation is 7.8%, not 5.1%", updated monthly. Feeds the retirement planner, goal targets and portfolio real returns, which all currently assume one flat inflation rate.
+2. **Goal-Success Probability** — Monte Carlo that resamples the user's *own* monthly spending/savings plus portfolio returns → "73% chance you reach this goal by June; cutting food delivery by ₹1,500/mo raises it to 91%". Uses #1's personal inflation. #1 + #2 together = a "personal financial digital twin": SmartFin models *your* inflation and *your* savings variability, not averages.
+3. **Present-Bias Score** — behavioural finance from transaction timing: share of discretionary spend in the 7 days after income lands, balance-drain speed → a per-user impatience score; time nudges to it (e.g. day 2 after payday). Natural novelty angle for the Nudge Engine.
+4. **Tax-aware portfolio (India)** — old vs new regime, 80C/ELSS limit, ₹1.25L LTCG exemption harvesting in the optimizer. Practical; less novel since tax calculators exist.
+
 ---
 
 ## 13. Interview / Presentation Talking Points
