@@ -18,27 +18,14 @@ import numpy as np
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from portfolio_optimizer.data_loader import load_or_generate_data, get_asset_summary, get_data_source_info
+from portfolio_optimizer.data_loader import (
+    load_or_generate_data, get_asset_summary, get_data_source_info, build_engine_inputs,
+)
 from portfolio_optimizer.return_predictor import predict as predict_returns, get_metadata, MODEL_PATH
 from portfolio_optimizer.markowitz_engine import MarkowitzEngine
 from portfolio_optimizer.personalizer import Personalizer
 
 portfolio_bp = Blueprint("portfolio", __name__, url_prefix="/api/portfolio")
-
-# ── Shared state (loaded once at import time) ────────────────────────────────
-
-_df_cache = None
-_engine_cache = None
-
-
-def _get_engine() -> MarkowitzEngine:
-    """Load return data and build Markowitz engine (cached)."""
-    global _df_cache, _engine_cache
-    if _engine_cache is None:
-        _df_cache = load_or_generate_data()
-        _engine_cache = MarkowitzEngine.from_return_series(_df_cache)
-    return _engine_cache
-
 
 def _get_predicted_mu() -> np.ndarray | None:
     """Try to get ML-predicted expected returns (falls back to historical if model missing)."""
@@ -51,6 +38,20 @@ def _get_predicted_mu() -> np.ndarray | None:
         return np.array([preds[a] * 12 for a in ASSET_NAMES])  # annualise
     except Exception:
         return None
+
+
+def _build_engine(df):
+    """
+    Markowitz engine from shrunk historical means + weekly-estimated covariance
+    (see data_loader.build_engine_inputs). If the XGBoost model is trained, its
+    reliability-weighted predictions (themselves blended toward the same shrunk
+    means) replace the expected returns. Returns (engine, engine_type).
+    """
+    mu, cov = build_engine_inputs(df)
+    predicted_mu = _get_predicted_mu()
+    if predicted_mu is not None:
+        return MarkowitzEngine(mu_annual=predicted_mu, cov_annual=cov), "ml_predicted"
+    return MarkowitzEngine(mu_annual=mu, cov_annual=cov), "historical"
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -93,17 +94,8 @@ def optimize():
         return jsonify({"success": False, "error": "investable_amount must be positive"}), 400
 
     try:
-        # Build engine — prefer ML-predicted returns, fall back to historical
         df = load_or_generate_data()
-        predicted_mu = _get_predicted_mu()
-
-        if predicted_mu is not None:
-            cov_annual = df.cov().values * 12
-            engine = MarkowitzEngine(mu_annual=predicted_mu, cov_annual=cov_annual)
-            engine_type = "ml_predicted"
-        else:
-            engine = MarkowitzEngine.from_return_series(df)
-            engine_type = "historical"
+        engine, engine_type = _build_engine(df)
 
         # Get optimal portfolio
         portfolio = engine.optimal_for_risk_score(risk_score)
@@ -124,6 +116,7 @@ def optimize():
             "engine": engine_type,
             "asset_summary": {
                 "mean_annual": {k: round(v * 100, 2) for k, v in summary["mean_annual"].items()},
+                "mean_annual_shrunk": {k: round(v * 100, 2) for k, v in summary["mean_annual_shrunk"].items()},
                 "vol_annual":  {k: round(v * 100, 2) for k, v in summary["vol_annual"].items()},
             },
             "model_metadata": get_metadata(),
@@ -144,13 +137,7 @@ def frontier():
     """
     try:
         df = load_or_generate_data()
-        predicted_mu = _get_predicted_mu()
-
-        if predicted_mu is not None:
-            cov_annual = df.cov().values * 12
-            engine = MarkowitzEngine(mu_annual=predicted_mu, cov_annual=cov_annual)
-        else:
-            engine = MarkowitzEngine.from_return_series(df)
+        engine, _ = _build_engine(df)
 
         frontier_pts = engine.efficient_frontier(n_points=60)
 
@@ -232,13 +219,7 @@ def whatif():
 
     try:
         df = load_or_generate_data()
-        predicted_mu = _get_predicted_mu()
-
-        if predicted_mu is not None:
-            cov_annual = df.cov().values * 12
-            engine = MarkowitzEngine(mu_annual=predicted_mu, cov_annual=cov_annual)
-        else:
-            engine = MarkowitzEngine.from_return_series(df)
+        engine, _ = _build_engine(df)
 
         personalizer = Personalizer(db_path=_db_path())
         results = []

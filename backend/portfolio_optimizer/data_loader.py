@@ -153,19 +153,79 @@ def get_data_source_info(manifest_path: str | None = None) -> dict:
     }
 
 
+# ── Expected-return shrinkage ──────────────────────────────────────────────
+# A sample mean over a few years is dominated by whatever happened in that
+# window (e.g. Silver over a 2022-26 rally). Each asset's mean is pulled
+# toward a risk-based prior, more strongly when its history is short or
+# volatile: posterior = w * sample_mean + (1 - w) * prior, with
+#   prior = RISK_FREE_RATE + PRIOR_SHARPE * vol      (more risk -> more return)
+#   w     = (1/SE²) / (1/SE² + 1/PRIOR_SD²),  SE = vol / sqrt(years)
+RISK_FREE_RATE = 0.065
+PRIOR_SHARPE = 0.3
+PRIOR_SD = 0.05
+SHRINKAGE_EXEMPT = {"Fixed_Deposit"}  # an assumption, not an estimate
+
+
+def estimate_annual_returns(df: pd.DataFrame) -> dict:
+    """Per-asset raw vs. shrunk annual mean return, with the inputs that produced it."""
+    out = {}
+    for asset in df.columns:
+        s = df[asset].dropna()
+        years = len(s) / 12
+        raw = float(s.mean() * 12) if len(s) else 0.0
+        vol = float(s.std() * np.sqrt(12)) if len(s) > 1 else 0.0
+        if asset in SHRINKAGE_EXEMPT or vol < 1e-9 or years == 0:
+            out[asset] = {"raw": raw, "prior": raw, "shrunk": raw, "weight_on_data": 1.0,
+                          "years": round(years, 1), "vol": vol}
+            continue
+        prior = RISK_FREE_RATE + PRIOR_SHARPE * vol
+        data_precision = years / vol ** 2
+        w = data_precision / (data_precision + 1 / PRIOR_SD ** 2)
+        out[asset] = {"raw": raw, "prior": prior, "shrunk": w * raw + (1 - w) * prior,
+                      "weight_on_data": w, "years": round(years, 1), "vol": vol}
+    return out
+
+
+def estimate_annual_cov(df_monthly: pd.DataFrame, weekly_path: str | None = None) -> np.ndarray:
+    """
+    Annualized covariance matrix, columns ordered like df_monthly.
+
+    Uses weekly returns when fetch_real_data.py has saved them (~4.3x more
+    observations than monthly, pairwise over overlapping weeks); otherwise
+    falls back to monthly. Weekly rather than daily because Silver is priced
+    off US futures, and daily returns across different market hours bias
+    correlations toward zero.
+    """
+    if weekly_path is None:
+        weekly_path = Path(__file__).parent / "data" / "asset_returns_weekly.csv"
+    weekly_path = Path(weekly_path)
+    if weekly_path.exists():
+        dfw = pd.read_csv(weekly_path, index_col=0, parse_dates=True)
+        if list(dfw.columns) == list(df_monthly.columns):
+            return dfw.cov().values * 52
+    return df_monthly.cov().values * 12
+
+
+def build_engine_inputs(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """(shrunk annual expected returns, annual covariance) in df column order."""
+    est = estimate_annual_returns(df)
+    mu = np.array([est[a]["shrunk"] for a in df.columns])
+    return mu, estimate_annual_cov(df)
+
+
 def get_asset_summary(df: pd.DataFrame) -> dict:
     """
     Compute annualised mean return and volatility for each asset class.
 
     Returns:
-        dict with keys 'mean_annual' and 'vol_annual' → each a Series
+        dict with 'mean_annual' (raw sample mean), 'mean_annual_shrunk'
+        (what the optimizer actually uses), 'vol_annual', 'correlation'
     """
-    mean_monthly = df.mean()
-    std_monthly = df.std()
-
+    est = estimate_annual_returns(df)
     return {
-        "mean_annual": (mean_monthly * 12).to_dict(),
-        "vol_annual": (std_monthly * np.sqrt(12)).to_dict(),
+        "mean_annual": (df.mean() * 12).to_dict(),
+        "mean_annual_shrunk": {a: e["shrunk"] for a, e in est.items()},
+        "vol_annual": (df.std() * np.sqrt(12)).to_dict(),
         "correlation": df.corr().to_dict(),
     }
 

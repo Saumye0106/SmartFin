@@ -359,9 +359,12 @@ export default function PortfolioOptimizer() {
                 }}
               >
                 {dataSource.type === 'real_historical' ? (
-                  <>📊 Real market data via yfinance ({Object.keys(dataSource.tickers || {}).length} tickers).
-                    {' '}Common overlap window: {dataSource.common_overlap_window?.start} to {dataSource.common_overlap_window?.end}.
-                    {' '}Fixed Deposit is assumption-based (no market series).</>
+                  <>📊 Real market data from {Object.keys(dataSource.per_asset_range || {}).length} sources
+                    (NSE indices &amp; ETFs, liquid-fund NAV, COMEX silver × USD/INR), {(() => {
+                      const yrs = Object.values(dataSource.per_asset_range || {}).map(r => r.months / 12);
+                      return yrs.length ? `${Math.min(...yrs).toFixed(0)}–${Math.max(...yrs).toFixed(0)} years` : '';
+                    })()} of history per asset. Expected returns are shrunk toward a risk-based prior;
+                    {' '}risk is estimated from weekly returns. Fixed Deposit is assumption-based (no market series).</>
                 ) : (
                   <>⚠️ Running on synthetic (simulated) data — not real market history. Run
                     {' '}<code>fetch_real_data.py</code> on the backend to switch to real data.</>
@@ -402,12 +405,19 @@ export default function PortfolioOptimizer() {
                   </div>
                 )}
 
-                {modelMeta.skipped_assets?.length > 0 && (
-                  <div style={{ fontSize: '0.76rem', color: 'rgba(255,255,255,0.45)', marginBottom: '0.75rem' }}>
-                    Skipped (not enough real history yet, using historical average instead): {' '}
-                    {modelMeta.skipped_assets.map(a => a.replace(/_/g, ' ')).join(', ')}
-                  </div>
-                )}
+                {(() => {
+                  const m = modelMeta.per_asset_metrics || {};
+                  const names = (status) => (modelMeta.skipped_assets || [])
+                    .filter(a => m[a]?.status === status).map(a => a.replace(/_/g, ' ')).join(', ');
+                  const thin = names('insufficient_data');
+                  const fixed = names('constant_target');
+                  return (thin || fixed) && (
+                    <div style={{ fontSize: '0.76rem', color: 'rgba(255,255,255,0.45)', marginBottom: '0.75rem' }}>
+                      {thin && <div>Not trained (not enough real history yet, using historical average): {thin}</div>}
+                      {fixed && <div>Not trained (fixed assumed rate, nothing to predict): {fixed}</div>}
+                    </div>
+                  );
+                })()}
 
                 {modelMeta.top_features?.length > 0 && (
                   <>

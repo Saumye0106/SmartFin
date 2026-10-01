@@ -43,6 +43,8 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
 
+from portfolio_optimizer.data_loader import estimate_annual_returns
+
 try:
     import xgboost as xgb
     XGB_AVAILABLE = True
@@ -135,12 +137,16 @@ def train(df: pd.DataFrame) -> Dict:
     metrics: Dict[str, dict] = {}
     importances_all: Dict[str, list] = {}
 
+    # Fallback / blend target = the same shrunk mean the optimizer uses, so
+    # ML predictions blend toward it rather than toward a raw sample mean.
+    shrunk = estimate_annual_returns(df)
+
     for asset in ASSET_NAMES:
         if asset not in df.columns:
             continue
 
         series = df[asset].dropna()
-        fallback_means[asset] = float(series.mean()) if len(series) else 0.0
+        fallback_means[asset] = shrunk[asset]["shrunk"] / 12
 
         features = _build_asset_features(series)
         target = _build_asset_target(series, features)

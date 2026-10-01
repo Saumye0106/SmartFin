@@ -115,16 +115,14 @@ class MarkowitzEngine:
     @classmethod
     def from_return_series(cls, df: pd.DataFrame) -> "MarkowitzEngine":
         """
-        Build engine from a monthly return DataFrame.
+        Build engine from a monthly return DataFrame, using shrunk expected
+        returns and weekly-estimated covariance (data_loader.build_engine_inputs).
 
         Args:
             df: pd.DataFrame, columns = asset names, monthly returns
         """
-        mu_monthly = df.mean().values
-        cov_monthly = df.cov().values
-        # Annualise
-        mu_annual = mu_monthly * 12
-        cov_annual = cov_monthly * 12
+        from portfolio_optimizer.data_loader import build_engine_inputs
+        mu_annual, cov_annual = build_engine_inputs(df)
         return cls(mu_annual, cov_annual)
 
     # ── Core solver ──────────────────────────────────────────────────────────
@@ -299,10 +297,9 @@ class MarkowitzEngine:
         if risk_score <= 2:
             return self.gmv_portfolio()
 
-        # For very aggressive: use Max Sharpe (or slightly beyond)
-        if risk_score >= 9:
-            return self.max_sharpe_portfolio()
-
+        # 9-10 stay on the frontier rather than jumping to Max-Sharpe: the
+        # tangency portfolio usually sits mid-frontier, so it made "Ultra
+        # Aggressive" less risky than "Aggressive" (risk 9 < risk 7).
         frontier = self.efficient_frontier(n_points=80)
         if not frontier:
             return self.gmv_portfolio()

@@ -92,13 +92,14 @@ smartfin-copy/
 │   │   └── migrations.py              ← Creates retirement DB tables on startup
 │   ├── portfolio_optimizer/            ← ✅ ML Module #1 (Markowitz + XGBoost) on REAL market data, 9 assets
 │   │   ├── api.py                      ← Flask Blueprint at /api/portfolio/ (every response carries `data_source`)
-│   │   ├── fetch_real_data.py          ← Pulls real prices via yfinance → data/asset_returns.csv + data/data_source.json
-│   │   ├── data_loader.py              ← Loads cached returns; get_data_source_info(); synthetic Gaussian fallback only if never fetched
+│   │   ├── fetch_real_data.py          ← Real data: NSE indices/ETFs (yfinance), liquid-fund NAV (mfapi.in), COMEX silver×USD/INR; cleans splits/bad ticks
+│   │   ├── data_loader.py              ← Loads returns; shrunk expected returns + weekly covariance (build_engine_inputs); synthetic fallback only if never fetched
 │   │   ├── return_predictor.py         ← Per-asset XGBoost; predict() shrinks toward historical mean by out-of-fold R²
 │   │   ├── markowitz_engine.py         ← SLSQP mean-variance optimizer, 35% per-asset cap (FD exempt), GMV-up frontier
 │   │   ├── personalizer.py             ← Adjusts allocation based on user EMI/loans/goals/savings from DB
 │   │   ├── train_model.py              ← Training script (`--refresh-data` re-fetches first)
 │   │   ├── data/asset_returns.csv      ← REAL monthly returns (per-asset full history, NaN before inception)
+│   │   ├── data/asset_returns_weekly.csv ← REAL weekly returns, used for the covariance matrix
 │   │   ├── data/data_source.json       ← Manifest: tickers, per-asset date ranges, fetch time, FD caveat
 │   │   └── models/                     ← return_predictor.pkl (models + scalers + blend weights) + model_metadata.json
 │   └── nudge_engine/                   ← ✅ ML Module #2 (Isolation Forest)
@@ -199,53 +200,59 @@ python data/train_enhanced_model.py  # from workspace root
 
 ---
 
-### Module 1: Portfolio Optimizer (Real market data via yfinance, 9-asset universe)
+### Module 1: Portfolio Optimizer (real market data, 9-asset universe)
 
 **Files:** `backend/portfolio_optimizer/`
 **API Blueprint:** `/api/portfolio/` (registered in `app.py`)
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/portfolio/optimize` | POST | Returns optimal allocation for given amount + risk score |
-| `/api/portfolio/frontier` | GET | Returns efficient frontier data points |
-| `/api/portfolio/model-info` | GET | Returns XGBoost metrics + feature importance + data source |
-| `/api/portfolio/whatif` | POST | What-if scenario comparison |
+| `/api/portfolio/optimize` | POST | Optimal allocation for an amount + risk score (1–10), personalized to the user's loans/goals/savings |
+| `/api/portfolio/frontier` | GET | Efficient frontier points + Min-Risk (GMV) and Best-Sharpe markers |
+| `/api/portfolio/model-info` | GET | XGBoost metrics, blend weights, feature importance + full data-source manifest |
+| `/api/portfolio/whatif` | POST | Compare allocations across several risk scores |
 
-**Dataset — real, not synthetic:**
-- `fetch_real_data.py` pulls real daily closes via `yfinance` for 7 tradeable proxies, resampled to monthly returns. Each asset keeps its **own full available history** (not truncated to a shared window) — e.g. Nifty 50 goes back to 2007 (228 months) while newer ETFs only as far as they've been listed. Gaps before an asset's inception are left as `NaN`; pandas' `mean()`/`cov()`/`corr()` already skip NaN by default, so risk/return stats use each asset's full real history, and only the shared XGBoost feature matrix is bottlenecked to the common overlap window.
-- Common overlap window across all 9 assets (as of last fetch): **2024-07-31 to 2026-09-30** (~27 months) — set by Mid-Cap ETF's short listing history. Re-run `fetch_real_data.py` periodically; this window grows over time as the newer ETFs accumulate history.
-- `Fixed_Deposit` has no market price series (FDs aren't traded) — the only assumption-based column, flat 6.5%/year, clearly labeled as such in `data/data_source.json` and surfaced in the API/UI. All 8 other assets are real market data.
-- The synthetic Gaussian generator in `data_loader.py` (`generate_return_series()`) still exists as an offline fallback if `fetch_real_data.py` has never been run (e.g. fresh clone, no internet) — `get_data_source_info()` is the single source of truth for which one is actually in use, surfaced in every API response as `data_source.type` (`real_historical` vs `synthetic_fallback`).
+Every response carries `data_source` (`real_historical` vs `synthetic_fallback`).
 
-**Asset universe (9 assets, 5 categories):**
-| Asset | Category | Ticker | History (last fetch) |
+**Pipeline (offline, run manually):** `fetch_real_data.py` → `data/asset_returns.csv` (monthly), `data/asset_returns_weekly.csv` (weekly), `data/data_source.json` (manifest) → `train_model.py` → `models/return_predictor.pkl` + `models/model_metadata.json`. Requests never touch the network.
+
+**Data sources — each asset uses its longest clean real series (as of 2026-10-02 fetch):**
+| Asset | Category | Source | History |
 |---|---|---|---|
-| Equity Large-Cap | Equity | `^NSEI` (Nifty 50) | 2007-10 → present (228 mo) |
-| Equity Mid-Cap | Equity | `MIDCAPETF.NS` | 2024-07 → present (27 mo) |
-| Equity Small-Cap | Equity | `SMALLCAP.NS` | 2024-04 → present (30 mo) |
-| International Equity | Equity | `MON100.NS` (Nasdaq 100 ETF) | 2011-04 → present (186 mo) |
-| Short-Term Debt | Debt | `LIQUIDBEES.NS` | 2009-02 → present (212 mo) |
-| Gold | Precious Metals | `GOLDBEES.NS` | 2009-02 → present (212 mo) |
-| Silver | Precious Metals | `SILVERBEES.NS` | 2022-03 → present (55 mo) |
-| REIT | Real Estate | `EMBASSY.NS` (Embassy Office Parks REIT) | 2019-05 → present (89 mo) |
-| Fixed Deposit | FD / Cash | — (assumption-based) | full range |
+| Equity Large-Cap | Equity | `^NSEI` — NIFTY 50 index | 2007-10 → (228 mo) |
+| Equity Mid-Cap | Equity | `^NSEMDCP50` — NIFTY MIDCAP 50 index | 2007-10 → (228 mo) |
+| Equity Small-Cap | Equity | `NIFTYSMLCAP250.NS` — NIFTY SMALLCAP 250 index | 2005-05 → (257 mo) |
+| International Equity | Equity | `MON100.NS` — Motilal Oswal Nasdaq-100 ETF (INR) | 2011-04 → (186 mo) |
+| Short-Term Debt | Debt | mfapi.in scheme 100851 — Nippon India Liquid Fund, Growth NAV | 2006-05 → (245 mo) |
+| Gold | Precious Metals | `GOLDBEES.NS` — Nippon India Gold BeES ETF | 2009-02 → (212 mo) |
+| Silver | Precious Metals | `SI=F` × `USDINR=X` — COMEX silver futures in INR | 2004-01 → (273 mo) |
+| REIT | Real Estate | `EMBASSY.NS` — Embassy Office Parks REIT | 2019-05 → (89 mo) |
+| Fixed Deposit | FD / Cash | — flat 6.5%/yr assumption (FDs aren't traded) | full range |
+
+- **Why indices / NAV / composite instead of ETFs:** the Mid-Cap and Small-Cap ETFs (`MIDCAPETF.NS`, `SMALLCAP.NS`) listed in 2024 and the Silver ETF in 2022. With 2–4.6 years of history, the 95% range of the true mean return was about ±24 points (Mid-Cap: −19%..+29%/yr), so the number was meaningless. The indices they track go back to 2005–07. `LIQUIDBEES.NS` pays its yield out as daily dividends, so its price barely moves and showed 3.0%/yr instead of ~6.8%. Yahoo's LIQUIDBEES series is also broken (first close ₹589 vs ₹1000 face value, NaN last close). A growth-plan NAV accumulates the yield.
+- **Data cleaning in `fetch_real_data.py`:** (1) the liquid-fund NAV is rescaled ~100× once in 2012 (₹10 → ₹1000 units), so any daily move >50% is dropped; (2) Yahoo leaves unit splits unadjusted for a day or two (GOLDBEES 1:100 in Dec 2019, MON100 1:10 in Jun 2021), so prices >3× away from their 5-day median are dropped; (3) the in-progress month/week is cut so a 1-day partial period isn't treated as a full return.
+- Gaps before an asset's history begins are left as NaN (never padded). pandas `mean`/`cov` skip NaN.
+- The synthetic Gaussian generator in `data_loader.py` remains only as an offline fallback if real data was never fetched; `get_data_source_info()` reports which is in use.
+
+**How the optimizer's inputs are estimated (`data_loader.build_engine_inputs`):**
+- **Expected returns are shrunk toward a risk-based prior** (`estimate_annual_returns`): `prior = 6.5% + 0.3 × vol`, `w = (1/SE²)/(1/SE² + 1/5%²)` with `SE = vol/√years`, `expected = w × sample_mean + (1 − w) × prior`. Short or volatile histories lean on the prior; precise ones keep their own mean. Last run: International 24.7% → 18.2%, Silver 18.5% → 16.9%, Large-Cap 10.1% → 11.3%, Debt 6.8% unchanged (w ≈ 1). Fixed Deposit is exempt. Constants `RISK_FREE_RATE`, `PRIOR_SHARPE`, `PRIOR_SD` are in `data_loader.py`.
+- **Covariance from weekly returns** (`estimate_annual_cov`, ×52), pairwise over overlapping weeks: ~4.3× more observations than monthly. Weekly rather than daily because Silver is priced off US futures; daily returns across different market hours bias correlations toward zero. Weekly vs monthly agree: vols within a few points, Gold–Silver correlation 0.56 vs 0.62.
 
 **Model:**
-- XGBoost Regressor, trained **independently per asset on that asset's own available history** (not one shared row-aligned matrix — see `return_predictor.py`'s module docstring for why: a shared matrix bottlenecks every asset to the newest asset's ~27-month window, which measured out to only 15 usable training rows total). Per-asset `TimeSeriesSplit` CV, `n_splits` scaled to available rows (2–5).
-- Assets with fewer than 20 usable rows after feature/target construction (Mid-Cap, Small-Cap — both real, just newly listed) are skipped for training; `predict()` falls back to that asset's own historical mean instead of a trained model. `Fixed_Deposit` is also skipped (constant target, zero variance — nothing for a model to learn).
-- As of last training: **6/9 assets trained**, overall R² = **-0.44** (genuinely negative now, not tautological — earlier synthetic-data version's R²=-0.73 was predicting noise from noise; this version predicts real next-month returns from real momentum/vol features and still can't beat the mean, a legitimate EMH result).
-- Markowitz optimizer: `scipy.optimize.minimize` with SLSQP → returns GMV, Max-Sharpe, risk-score-matched portfolios. Covariance matrix is regularized (jitter scaled to the matrix's own eigenvalue range, not a fixed `1e-8`) — `Fixed_Deposit`'s exactly-zero real variance creates a true zero eigenvalue otherwise, which let SLSQP land on different non-global optima across the frontier sweep and produce a jagged, non-monotonic chart. `efficient_frontier()` also only sweeps target returns from the GMV return upward (the true efficient/upper branch) — sweeping below GMV, as the old code did, computes the dominated lower branch instead, invisible with the old synthetic data (no negative-return assets) but exposed once Gold's real ML-predicted return went negative.
-- **Prediction shrinkage (reliability-weighted blend):** `predict()` does not feed raw XGBoost outputs to the optimizer. Each asset's expected return is `w × ml_prediction + (1 − w) × historical_mean`, with `w = clip(out-of-fold R², 0, 1) × min(1, training_months / 120)`, computed at training time and stored in the model artifact and `model_metadata.json` (`per_asset_metrics[asset].ml_weight`, `blend.avg_ml_weight`). A model that doesn't beat the historical mean out-of-sample gets zero say. As of last training every model has R² < 0, so **all weights are 0** and allocations run on real historical means. The UI's Engine chip reads "Historical avg" and the model card states "ML influence on expected returns: 0%" and why. As assets accrue history or models improve, ML influence rises on its own, with no code change. `predict(df, raw=True)` still returns unblended predictions for inspection.
-- **Why it was needed:** the raw predictions were fed straight into mean-variance optimization, producing ~95% Silver allocations and a +80%/yr Silver "expected return" off only 43 months of data. This is the classic "Markowitz is an error-maximizer" failure: the optimizer concentrates in whichever estimate is most overstated.
-- **Per-asset weight cap:** `MAX_ASSET_WEIGHT = 0.35` in `markowitz_engine.py`, applied as SLSQP bounds in every solve (min-variance, GMV, max-Sharpe). `Fixed_Deposit` is exempt (`UNCAPPED_ASSETS`) so conservative portfolios can still be mostly cash. `efficient_frontier()`'s upper target is `_max_feasible_return()`, the best return reachable under the caps (greedy fill by descending return); `mu.max()` isn't reachable once assets are capped.
-- **Resulting behavior (last run):** risk 1 → 5.7%/yr at 0.3% vol (mostly FD + liquid debt); risk 5 → 13.5% at 6.6% vol; risk 9–10 → 19.2% at 11.8% vol with International Equity at the 35% cap. Best-Sharpe 1.07, down from an inflated 2.95.
+- XGBoost Regressor trained **independently per asset on its own history** (a shared row-aligned matrix bottlenecked everything to the newest asset's window). Per-asset `TimeSeriesSplit`, `n_splits` 2–5 scaled to rows. Assets under 20 usable rows are skipped; Fixed Deposit is skipped as a constant target.
+- Last training: **8/9 assets trained** (only FD skipped), overall out-of-fold R² = **−0.47**. Every model is worse than its own historical mean, a genuine Efficient-Market result on real prices.
+- **Reliability-weighted blend:** `predict()` returns `w × ml + (1 − w) × shrunk_mean` with `w = clip(R², 0, 1) × min(1, months/120)`. All R² < 0, so all `w = 0` and allocations run on shrunk historical means. The UI shows "Historical avg" and "ML influence 0%". `predict(df, raw=True)` gives unblended values.
+- **Markowitz (SLSQP):** 35% per-asset cap (`MAX_ASSET_WEIGHT`, FD exempt) on every solve. Covariance jitter scaled to the largest eigenvalue (FD's zero variance makes the matrix singular otherwise). The frontier is swept only from the GMV return up to the max return reachable under the caps (`_max_feasible_return`).
+- **Risk-score mapping:** 1–2 → GMV; 3–10 → evenly along the efficient frontier. Risk 9–10 used to map to the Max-Sharpe portfolio, which sits mid-frontier, so "Ultra Aggressive" was less risky than "Aggressive". Max-Sharpe is now only a chart marker.
+- **Resulting behavior (last run):** risk 1 → 6.5%/yr at 0.3% vol (FD 65% + liquid debt 35%); risk 5 → 11.1% at 5.9% vol (debt 35%, gold 22%, international 17%, FD 13%, small-cap 10%); risk 10 → 16.8% at 15.4% vol (small-cap 35%, international 35%, silver 23%, gold 7%). Volatility rises monotonically with risk score. Large-Cap and Mid-Cap usually get 0%: on this data Small-Cap + International dominate them on risk/return, and they're highly correlated with Small-Cap (0.85+).
+- **Personalization** (`personalizer.py`) then shifts weight toward FD/debt for high EMI (>40% / >25% of income), 2+ active loans, a goal within 12 / 36 months, or savings <5% of income. Data is read from `monthly_budgets`, `loans`, `financial_goals`, `expense_entries`.
 
 **Fetching real data / retraining:**
 ```bash
 cd backend
-python -X utf8 portfolio_optimizer/fetch_real_data.py   # fetch/refresh real data only
-python -X utf8 portfolio_optimizer/train_model.py        # train on whatever's cached
-python -X utf8 portfolio_optimizer/train_model.py --refresh-data  # fetch + train in one step
+python -X utf8 portfolio_optimizer/fetch_real_data.py              # refresh data only (needs internet: Yahoo + mfapi.in)
+python -X utf8 portfolio_optimizer/train_model.py                  # train on whatever's cached
+python -X utf8 portfolio_optimizer/train_model.py --refresh-data   # fetch + train in one step
 ```
 
 ---
@@ -463,7 +470,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 > "We use a GradientBoosting Regressor trained on 52,424 records from two Kaggle datasets (global personal finance + India personal finance). The target labels are generated by an 8-factor rule-based formula we designed — savings behavior, debt burden, expense control, life stage, and loan metrics. The model learns to replicate that formula accurately. The key advantage: our scoring is fully transparent and explainable to users, while the ML layer enables fast generalization to new users without running the rule engine."
 
 ### Portfolio Optimizer Story
-> "The core optimization is Markowitz Mean-Variance (SLSQP) over 9 real asset classes — Nifty 50, Mid-Cap, Small-Cap, Nasdaq 100 (via an NSE-listed ETF), short-term debt, gold, silver, and a REIT, all fetched via yfinance, plus Fixed Deposit as the one openly-assumption-based column since FDs aren't traded. XGBoost predicts next-month returns per asset from its own real momentum/volatility history, and overall R²≈-0.44 — genuinely negative, consistent with the Efficient Market Hypothesis, not a tautology: earlier versions of this module used fabricated Gaussian-noise 'market data,' where a negative R² just meant noise can't predict noise. This version predicts real prices and still can't beat the mean, which is the actual EMH result. Two newly-listed assets (Mid-Cap, Small-Cap ETFs) don't have enough real history yet to train reliably, so they're transparently skipped and fall back to their historical mean — disclosed in the API and UI, not hidden. Crucially, the ML only influences allocations as much as it has earned: each prediction is blended with the historical mean, weighted by its out-of-sample R², so today it has zero say. Feeding raw predictions in gave 95% Silver, the classic 'Markowitz as error-maximizer' failure. Plus a 35% per-asset cap for diversification."
+> "The core is Markowitz mean-variance optimization (SLSQP) over 9 Indian asset classes built from real data: NIFTY 50 / Midcap 50 / Smallcap 250 indices, a Nasdaq-100 ETF, a liquid fund's NAV, Gold ETF, COMEX silver in rupees, and a REIT. That's 7 to 23 years each, with Fixed Deposit as the one labeled assumption. Three estimation choices make it robust. First, sample means from short or lucky periods are shrunk toward a risk-based prior, so Silver's 2020s rally or Nasdaq's AI run don't dominate. Second, covariance comes from weekly returns for ~4× more data, weekly rather than daily because silver trades on US hours. Third, there's a 35% per-asset cap. XGBoost predicts next-month returns per asset, and its influence is weighted by its out-of-sample R². Every model scores below zero, so it currently has zero say. That's the Efficient Market Hypothesis showing up honestly on real prices. Along the way we found data problems you only catch by checking: unadjusted stock splits, a liquid ETF whose price ignores its own yield, and a NAV rescaled 100×."
 
 ### Nudge Engine Story
 > "Isolation Forest runs per-user on their own 16+ week spending history. It doesn't need labeled anomaly data — it learns each user's baseline by itself (unsupervised). A spending week that is very different from that user's personal pattern gets flagged, regardless of whether it's 'expensive' by some global standard."
@@ -493,7 +500,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 7. **`retirement_planning/` integration_manager.py** — imports `financial_health_scorer` internally. Do not delete `financial_health_scorer.py` without updating `integration_manager.py` first.
 8. **~~`validation_schemas.py` marshmallow bug~~ — FIXED 2026-10-02.** Marshmallow 4 passes `data_key=` to `@validates` methods; all validators now take `**kwargs` so they run on 3.x and 4.x. Any new `@validates` method needs `**kwargs` too.
 9. **~~Personalizer DB queries didn't match `auth.db`~~ — FIXED 2026-10-02.** Fetchers now read `monthly_budgets`, `loans` (not deleted, not matured), `financial_goals`, `expense_entries`. Failures still fall back to "no adjustment" but are logged as `personalizer: ... failed` warnings. If personalization ever seems to do nothing again, grep the server log for that prefix first.
-10. **Portfolio Optimizer re-fetch cadence:** `data/asset_returns.csv` is a snapshot. Re-run `fetch_real_data.py` + `train_model.py` periodically. Mid-Cap and Small-Cap ETFs cross the 20-usable-row training threshold around early 2027 and will then start training instead of falling back to historical mean.
+10. **Portfolio Optimizer re-fetch cadence:** the data files are snapshots. Re-run `fetch_real_data.py` + `train_model.py` periodically (needs internet: Yahoo Finance + mfapi.in). REIT is the only short history (2019+); its mean leans on the prior until it accrues more. If Yahoo changes a ticker or mfapi.in is down, `fetch_and_save()` raises and leaves the old CSVs untouched rather than writing partial data.
 11. **Windows dev gotchas (from the verification runs):** use `C:\Python314\python.exe` explicitly, because a bare `python3` resolves to the Microsoft Store stub (exit code 49). `/tmp/...` paths inside Python on Windows don't match Git Bash's `/tmp`, so write scratch files to the working dir or the session scratchpad. To stop the dev servers, find the PID with `netstat -ano | grep :5000` and run `taskkill //PID <pid> //F`; `kill %1` doesn't reliably stop the Python child process.
 12. **IDE red squiggles on `flask`/`flask_jwt_extended` imports** — the editor's Python language server doesn't know packages live in `C:\Users\saumy\AppData\Roaming\Python\Python314\site-packages` (see item 1). Fixed via `.vscode/settings.json` → `"python.defaultInterpreterPath": "C:\\Python314\\python.exe"`. If squiggles persist, reload the window or run "Python: Select Interpreter" and pick that path manually. Purely cosmetic — doesn't affect running the app.
 
@@ -557,12 +564,26 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 | 28 | Portfolio personalization never applied (see #19) | Queries against non-existent `users.income/emi/savings`, `loans.status`, `goals`; a bare `except: pass` hid it. Likely origin: §6 documented the budget tables with columns that don't exist | Rewrote the 4 fetchers against the real tables (§6, now corrected); failures are logged instead of swallowed | Verified live with data created through the API: 47% EMI ratio, 2 loans, goal in 6 months, 2.5% savings → all 4 rules fire, equity 25.3% → 14.7%; a user with no data gets no adjustments |
 | 29 | §6 schema docs were wrong for `monthly_budgets`/`budget_categories`/`expense_entries` | Written from memory, never checked against the DB | Rewritten from `PRAGMA table_info`; added notes on where income/EMI/savings/goals actually live | Cross-checking while fixing #28 |
 
+### Session 2026-10-02 (cont.) — Portfolio Optimizer data quality (`main`)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 30 | Mid-Cap, Small-Cap and Silver means were meaningless (Mid-Cap 95% range −19%..+29%/yr) | ETF proxies listed 2022–24, only 2–4.6 years of data | Switched to `^NSEMDCP50`, `NIFTYSMLCAP250.NS`, COMEX silver × USD/INR → 19–23 years each | User asked if the data is sufficient; computed per-asset standard errors |
+| 31 | Debt showed 3.0%/yr, so it got 0% in every portfolio | `LIQUIDBEES` pays its yield as daily dividends, so the price barely moves; Yahoo's series is also broken (₹589 first close, NaN last) | Nippon India Liquid Fund growth NAV via mfapi.in (6.8%/yr, 20 years). Debt now gets 23–35% | Same review: 3% is implausible for a liquid fund |
+| 32 | Liquid-fund NAV implied a 34%/yr return | One ~100× jump in 2012 (unit face value ₹10 → ₹1000) | Drop any daily NAV move >50% as a rescale | Sanity-checked the CAGR before using it |
+| 33 | Weekly volatility of 2383% (Gold) and 233% (International); Gold–Silver correlation 0.03 | Yahoo left the GOLDBEES 1:100 (Dec 2019) and MON100 1:10 (Jun 2021) splits unadjusted for 1–2 days. Monthly sampling hid it because both days fell inside one month | Drop prices >3× away from their 5-day median. Weekly and monthly estimates now agree | Compared weekly vs monthly vols before trusting weekly |
+| 34 | Last month for Silver was a 1-day partial period | Fetched on Oct 1, so October had 1 trading day | Cut every series at the last complete month (and the weekly series too) | Spotted a 2026-10-31 row in the output |
+| 35 | Lucky-period means (International 24.7%, Silver 18.5%) would dominate allocations | Sample means are noisy; the optimizer amplifies noise | Shrinkage toward `6.5% + 0.3 × vol` weighted by each mean's standard error; the predictor's fallback/blend target uses the same shrunk means | Planned (fix #3 of 4) |
+| 36 | **Risk 9 portfolio was less risky than risk 7** | Risk 9–10 mapped to Max-Sharpe, which sits mid-frontier. Hidden earlier because inflated Silver put Max-Sharpe at the top | Risk 3–10 now map evenly along the frontier; volatility verified monotonic from 0.3% (risk 1) to 15.4% (risk 10) | Printed all 10 risk scores after the data change |
+| 37 | UI said "via yfinance" and listed FD as "not enough history" | Debt now comes from mfapi.in; FD is skipped as a constant, not for lack of data | Banner lists source types and years of history; skipped assets show their actual reason | Playwright screenshot review |
+
 ---
 
 ## 16. Change Log (most recent first)
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-02 | Claude Code (Opus 5.5) | Portfolio Optimizer data quality: Mid/Small-cap → NIFTY indices, Silver → COMEX×USD/INR, Debt → liquid-fund growth NAV (mfapi.in), giving 7–23 years per asset. Cleaned unadjusted splits / NAV rescale / partial months. Expected returns shrunk toward a risk-based prior; covariance from weekly returns. Risk scores 3–10 now map evenly along the frontier (risk 9 was safer than risk 7). Retrained: 8/9 models, R² −0.47, ML weight 0. Verified live: all 4 endpoints, monotonic risk 1→10 (0.3%→15.4% vol), Playwright UI check with 0 console errors. §15 #30–#37 |
 | 2026-10-02 | Claude Code (Opus 5.5) | Merged `refactor/app-blueprints` (fast-forward) and `feature/portfolio-real-data` (`--no-ff`, only AGENTS.md conflicted) into `main`. Fixed goal creation (marshmallow 4 `data_key` kwarg; all `@validates` methods now take `**kwargs`; pin relaxed to `>=3.23.2,<5`). Fixed the portfolio personalizer to read the real schema (`monthly_budgets`, `loans`, `financial_goals`, `expense_entries`) and log lookup failures instead of swallowing them; all 4 rules verified firing on real data for the first time. Corrected the §6 budget-table schema docs. Added §15 entries #23–#29. Next: Nudge Engine audit |
 | 2026-09-30 | Claude Code (Opus 5.5) | SQL-injection audit of the whole backend: no live risk (all user input uses `?` binding; see the Q&A row in §13). Hardened the one theoretical gap: the `db_utils.py` helpers interpolated table names into SQL with f-strings (safe only because the names were hardcoded). Added a `LOAN_TABLES` allowlist and a `_safe_table_identifier()` validator that raises on anything else, plus a regression test in `unit_test/test_loan_schema.py` (12/12 pass). Installed `pytest==8.3.4`, which was already in requirements.txt but missing locally |
 | 2026-09-29 | Claude Code (Opus 5.5) | On `feature/portfolio-real-data`: fixed extreme allocations from noisy ML predictions. `predict()` now shrinks each prediction toward the asset's historical mean, weighted by out-of-fold R² and training length (currently 0 for every asset, since all R² < 0). Added a 35% per-asset weight cap (Fixed Deposit exempt) and a cap-aware frontier upper bound. UI shows "Historical avg" / "ML influence 0%" instead of implying the ML drives allocations. Verified via curl on all endpoints plus a Playwright check (monotonic frontier, max non-FD weight 0.35, zero console errors). Added §15 "Problems Faced & Solved" covering all sessions |
