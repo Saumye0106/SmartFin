@@ -7,14 +7,21 @@ import './PortfolioOptimizer.css';
 const ASSET_COLORS = {
   'Large-Cap Equity': '#7c3aed',
   'Mid-Cap Equity': '#a855f7',
+  'Small-Cap Equity': '#c084fc',
+  'International Equity (Nasdaq 100)': '#6366f1',
   'Short-Term Debt': '#3b82f6',
   'Gold': '#f59e0b',
+  'Silver': '#94a3b8',
+  'REIT (Real Estate)': '#14b8a6',
   'FD / Cash': '#10b981',
+  'Fixed Deposit': '#10b981',
 };
 
 const CAT_COLORS = {
   'Equity': '#7c3aed',
   'Debt': '#3b82f6',
+  'Precious Metals': '#f59e0b',
+  'Real Estate': '#14b8a6',
   'Gold': '#f59e0b',
   'FD / Cash': '#10b981',
 };
@@ -161,6 +168,7 @@ export default function PortfolioOptimizer() {
   const [portfolio, setPortfolio] = useState(null);
   const [frontier, setFrontier] = useState(null);
   const [modelMeta, setModelMeta] = useState(null);
+  const [dataSource, setDataSource] = useState(null);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [loadingFrontier, setLoadingFrontier] = useState(false);
@@ -168,7 +176,10 @@ export default function PortfolioOptimizer() {
   // Load model info on mount
   useEffect(() => {
     api.get('/api/portfolio/model-info')
-      .then(r => setModelMeta(r.data?.metadata || null))
+      .then(r => {
+        setModelMeta(r.data?.metadata || null);
+        setDataSource(r.data?.data_source || null);
+      })
       .catch(() => { });
   }, []);
 
@@ -335,6 +346,28 @@ export default function PortfolioOptimizer() {
           {/* Model Info Card */}
           <div className="portfolio-card">
             <h2>🤖 ML Model Info</h2>
+            {dataSource && (
+              <div
+                style={{
+                  fontSize: '0.78rem',
+                  padding: '0.5rem 0.75rem',
+                  borderRadius: '8px',
+                  marginBottom: '0.9rem',
+                  background: dataSource.type === 'real_historical' ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.15)',
+                  border: `1px solid ${dataSource.type === 'real_historical' ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.4)'}`,
+                  color: dataSource.type === 'real_historical' ? '#6ee7b7' : '#fbbf24',
+                }}
+              >
+                {dataSource.type === 'real_historical' ? (
+                  <>📊 Real market data via yfinance ({Object.keys(dataSource.tickers || {}).length} tickers).
+                    {' '}Common overlap window: {dataSource.common_overlap_window?.start} to {dataSource.common_overlap_window?.end}.
+                    {' '}Fixed Deposit is assumption-based (no market series).</>
+                ) : (
+                  <>⚠️ Running on synthetic (simulated) data — not real market history. Run
+                    {' '}<code>fetch_real_data.py</code> on the backend to switch to real data.</>
+                )}
+              </div>
+            )}
             {modelMeta ? (
               <>
                 <div className="model-info-grid">
@@ -344,17 +377,37 @@ export default function PortfolioOptimizer() {
                   </div>
                   <div className="model-metric">
                     <div className="mm-label">Avg R²</div>
-                    <div className="mm-value">{(modelMeta.overall_r2 * 100).toFixed(1)}%</div>
+                    <div className="mm-value">
+                      {modelMeta.overall_r2 != null ? `${(modelMeta.overall_r2 * 100).toFixed(1)}%` : 'n/a'}
+                    </div>
                   </div>
                   <div className="model-metric">
-                    <div className="mm-label">Assets Modeled</div>
-                    <div className="mm-value">{modelMeta.n_assets}</div>
+                    <div className="mm-label">Assets Trained</div>
+                    <div className="mm-value">
+                      {(modelMeta.trained_assets?.length ?? modelMeta.n_assets)} / {modelMeta.n_assets}
+                    </div>
                   </div>
                   <div className="model-metric">
                     <div className="mm-label">CV Strategy</div>
                     <div className="mm-value" style={{ fontSize: '0.8rem' }}>{modelMeta.cv_strategy?.split('(')[0]}</div>
                   </div>
                 </div>
+
+                {modelMeta.blend && (
+                  <div style={{ fontSize: '0.76rem', color: 'rgba(255,255,255,0.55)', marginBottom: '0.6rem' }}>
+                    ML influence on expected returns: {(modelMeta.blend.avg_ml_weight * 100).toFixed(0)}%
+                    {modelMeta.blend.avg_ml_weight === 0 && (
+                      <> — no model beats its asset's historical average out-of-sample (R² ≤ 0), so allocations use real historical returns</>
+                    )}
+                  </div>
+                )}
+
+                {modelMeta.skipped_assets?.length > 0 && (
+                  <div style={{ fontSize: '0.76rem', color: 'rgba(255,255,255,0.45)', marginBottom: '0.75rem' }}>
+                    Skipped (not enough real history yet, using historical average instead): {' '}
+                    {modelMeta.skipped_assets.map(a => a.replace(/_/g, ' ')).join(', ')}
+                  </div>
+                )}
 
                 {modelMeta.top_features?.length > 0 && (
                   <>
@@ -427,7 +480,17 @@ export default function PortfolioOptimizer() {
                 <div className="stat-chip">
                   <span className="chip-label">Engine</span>
                   <span className="chip-value" style={{ fontSize: '0.85rem' }}>
-                    {portfolio.engine === 'ml_predicted' ? '🤖 ML' : '📈 Historical'}
+                    {(() => {
+                      if (portfolio.engine !== 'ml_predicted') return '📈 Historical';
+                      const w = portfolio.model_metadata?.blend?.avg_ml_weight ?? 0;
+                      return w > 0 ? `🤖 ML blend (${(w * 100).toFixed(0)}%)` : '📈 Historical avg';
+                    })()}
+                  </span>
+                </div>
+                <div className="stat-chip">
+                  <span className="chip-label">Data</span>
+                  <span className="chip-value" style={{ fontSize: '0.85rem' }}>
+                    {portfolio.data_source?.type === 'real_historical' ? '📊 Real market data' : '⚠️ Synthetic'}
                   </span>
                 </div>
               </div>

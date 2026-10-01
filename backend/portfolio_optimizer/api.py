@@ -18,7 +18,7 @@ import numpy as np
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from portfolio_optimizer.data_loader import load_or_generate_data, get_asset_summary
+from portfolio_optimizer.data_loader import load_or_generate_data, get_asset_summary, get_data_source_info
 from portfolio_optimizer.return_predictor import predict as predict_returns, get_metadata, MODEL_PATH
 from portfolio_optimizer.markowitz_engine import MarkowitzEngine
 from portfolio_optimizer.personalizer import Personalizer
@@ -127,6 +127,7 @@ def optimize():
                 "vol_annual":  {k: round(v * 100, 2) for k, v in summary["vol_annual"].items()},
             },
             "model_metadata": get_metadata(),
+            "data_source": get_data_source_info(),
         })
 
     except Exception as e:
@@ -174,6 +175,7 @@ def frontier():
                     "label": "Best Sharpe",
                 },
             },
+            "data_source": get_data_source_info(),
         })
 
     except Exception as e:
@@ -191,7 +193,11 @@ def model_info():
             "message": "Model not trained yet. Run portfolio_optimizer/train_model.py",
         }), 404
 
-    return jsonify({"success": True, "metadata": metadata})
+    return jsonify({
+        "success": True,
+        "metadata": metadata,
+        "data_source": get_data_source_info(),
+    })
 
 
 @portfolio_bp.route("/whatif", methods=["POST"])
@@ -248,7 +254,12 @@ def whatif():
                 "portfolio": portfolio,
             })
 
-        return jsonify({"success": True, "scenarios": results, "investable_amount": investable_amount})
+        return jsonify({
+            "success": True,
+            "scenarios": results,
+            "investable_amount": investable_amount,
+            "data_source": get_data_source_info(),
+        })
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

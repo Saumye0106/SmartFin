@@ -1,0 +1,70 @@
+{
+  "type": "real_historical",
+  "fetched_at": "2026-09-28T23:27:56.088756+00:00",
+  "tickers": {
+    "Equity_LargeCap": "^NSEI",
+    "Equity_MidCap": "MIDCAPETF.NS",
+    "Equity_SmallCap": "SMALLCAP.NS",
+    "International_Equity": "MON100.NS",
+    "Debt_ShortTerm": "LIQUIDBEES.NS",
+    "Gold": "GOLDBEES.NS",
+    "Silver": "SILVERBEES.NS",
+    "REIT": "EMBASSY.NS"
+  },
+  "per_asset_range": {
+    "Equity_LargeCap": {
+      "ticker": "^NSEI",
+      "start": "2007-10-31",
+      "end": "2026-09-30",
+      "months": 228
+    },
+    "Equity_MidCap": {
+      "ticker": "MIDCAPETF.NS",
+      "start": "2024-07-31",
+      "end": "2026-09-30",
+      "months": 27
+    },
+    "Equity_SmallCap": {
+      "ticker": "SMALLCAP.NS",
+      "start": "2024-04-30",
+      "end": "2026-09-30",
+      "months": 30
+    },
+    "International_Equity": {
+      "ticker": "MON100.NS",
+      "start": "2011-04-30",
+      "end": "2026-09-30",
+      "months": 186
+    },
+    "Debt_ShortTerm": {
+      "ticker": "LIQUIDBEES.NS",
+      "start": "2009-02-28",
+      "end": "2026-09-30",
+      "months": 212
+    },
+    "Gold": {
+      "ticker": "GOLDBEES.NS",
+      "start": "2009-02-28",
+      "end": "2026-09-30",
+      "months": 212
+    },
+    "Silver": {
+      "ticker": "SILVERBEES.NS",
+      "start": "2022-03-31",
+      "end": "2026-09-30",
+      "months": 55
+    },
+    "REIT": {
+      "ticker": "EMBASSY.NS",
+      "start": "2019-05-31",
+      "end": "2026-09-30",
+      "months": 89
+    }
+  },
+  "common_overlap_window": {
+    "start": "2024-07-31",
+    "end": "2026-09-30",
+    "note": "All 9 assets have real data only within this overlap window. Assets with longer individual history (e.g. Nifty 50, Gold, Liquid ETF) still use their full real range for risk/return statistics (pandas mean/cov/corr skip NaN by default); only the XGBoost next-month predictor is limited to this shared window, since it trains one aligned feature matrix across all assets."
+  },
+  "fixed_deposit_note": "Fixed_Deposit has no market price series (FDs aren't traded) \u2014 assumed flat 6.5% annual for the full date range. This is the only assumption-based column; all others are real market data."
+}
