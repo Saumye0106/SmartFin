@@ -456,6 +456,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - [x] ~~Fix `portfolio_optimizer/personalizer.py` DB queries~~ — done 2026-10-02, all 4 rules verified firing on real data (§15 #28)
 - [x] ~~Merge `refactor/app-blueprints` and `feature/portfolio-real-data` into `main`~~ — done 2026-10-02 (§15 #26)
 - [x] ~~Fix marshmallow bug in `POST /api/profile/goals`~~ — done 2026-10-02 (§15 #27)
+- [ ] **Deferred by user (2026-10-02, "I'll come back to this"):** the Portfolio Optimizer's XGBoost return predictor has R² −0.47 and 0% influence, so it currently adds nothing. Plan: (1) replace it with a next-month **volatility** predictor (volatility clustering is genuinely predictable; it feeds the covariance, so ML would actually move allocations); (2) add a **walk-forward backtest** (rebuild yearly on past-only data; compare return/vol/max drawdown vs all-Nifty and 60/40), run with and without the vol model.
 - [ ] **NEXT:** audit the Nudge Engine the way the Portfolio Optimizer was audited — does it run on real user data or demo-seeded spikes, does the Isolation Forest result hold up, is anything fabricated or silently broken?
 - [ ] Replace `MainDashboard.jsx` health score widget with Portfolio Summary card (optional)
 - [ ] Full removal of old scorer — `financial_health_scorer.py`, `ScoreDisplay.jsx`, `/api/predict` (optional)
