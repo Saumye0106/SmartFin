@@ -897,6 +897,19 @@ const api = {
     }
   },
 
+  async getRecurring() {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/import/recurring`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error?.response?.data?.error || 'Failed to load recurring payments');
+    }
+  },
+
   async undoStatementImport(batchId) {
     const token = this.getStoredToken();
     if (!token) throw new Error('No authentication token found');

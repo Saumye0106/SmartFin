@@ -19,11 +19,15 @@ import re
 # plus two import-only categories that never become expenses.
 EXPENSE_CATEGORIES = ("rent", "food", "travel", "shopping", "emi", "utilities",
                       "healthcare", "education", "insurance", "other")
-NON_EXPENSE_CATEGORIES = ("income", "transfer")
+NON_EXPENSE_CATEGORIES = ("income", "transfer", "investment")
 ALL_CATEGORIES = EXPENSE_CATEGORIES + NON_EXPENSE_CATEGORIES
 
 # (category, keywords) — checked in order against the lowercased narration.
 _DEBIT_RULES: list[tuple[str, tuple[str, ...]]] = [
+    # Before "emi": SIPs are often collected via NACH mandates too, but they are savings, not spending.
+    ("investment", ("sip", "mutual fund", "mf", "bse star", "nse mfss", "cams", "kfintech", "kfin", "zerodha",
+                    "coin by zerodha", "groww", "kuvera", "upstox", "paytm money", "indmoney", "et money", "smallcase",
+                    "nps", "ppf", "rd installment", "recurring deposit")),
     ("emi", ("emi", "loan", "bajaj fin", "home credit", "nach", "ach d", "ecs/", "hdfc ltd", "lic housing", "tata capital", "fullerton")),
     ("insurance", ("insurance", "policybazaar", "lic of india", "lic premium", "hdfc ergo", "icici lombard", "star health", "acko", "digit insurance", "max life", "sbi life")),
     ("rent", ("rent", "nobroker", "nestaway", "housing.com", "landlord")),
@@ -51,7 +55,7 @@ _CREDIT_RULES: list[tuple[str, tuple[str, ...]]] = [
                 "refund", "reversal", "dividend")),
 ]
 
-_SELF_TRANSFER_HINTS = ("self", "own account", "to own", "sweep", "fd booked", "fd closure", "rd installment")
+_SELF_TRANSFER_HINTS = ("self", "own account", "to own", "sweep", "fd booked", "fd closure")
 
 # Tokens that are never the merchant name in a narration.
 _STOP = {

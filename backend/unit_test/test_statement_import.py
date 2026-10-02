@@ -214,3 +214,113 @@ def test_undo_removes_batch_and_its_expenses(conn):
     remaining = conn.execute("SELECT id FROM expense_entries").fetchall()
     assert [x[0] for x in remaining] == ["m1"]  # manual expense untouched
     assert service.undo_batch(conn, 2, r["batch_id"])["transactions_removed"] == 0  # other users can't undo
+
+
+# ── Phase 2: recurring detection + income ────────────────────────────────────
+
+from datetime import date as _date, timedelta as _td
+
+from statement_import.recurring import detect_monthly_income, detect_recurring
+
+SIX = "hdfc_style_6months.csv"
+
+
+def _rows_from(name):
+    out = []
+    for t in parse_statement(name, _read(name)):
+        m = extract_merchant(t.description)
+        out.append(dict(txn_date=t.txn_date, merchant=m, direction=t.direction, amount=t.amount,
+                        category=categorize(t.description, t.direction, m)[0], description=t.description))
+    return out
+
+
+def test_detects_exactly_the_recurring_streams():
+    rec = {r["merchant"]: r for r in detect_recurring(_rows_from(SIX))}
+    assert set(rec) == {"Acme Technologies", "Ramesh Kumar", "Zerodha Coin", "Bajaj Finance",
+                        "Bescom Bill", "Airtel Prepaid", "Netflix"}
+    # irregular spending must not be called recurring
+    assert not {"Swiggy", "Uber", "Amazon"} & set(rec)
+    assert rec["Acme Technologies"]["kind"] == "income"
+    assert rec["Ramesh Kumar"]["kind"] == "rent"
+    assert rec["Zerodha Coin"]["kind"] == "investment"
+    assert rec["Bajaj Finance"]["kind"] == "emi"
+    assert rec["Bescom Bill"]["amount_type"] == "variable"
+    assert rec["Netflix"]["amount_type"] == "fixed"
+    assert all(r["cadence"] == "monthly" and r["active"] for r in rec.values())
+
+
+def test_calendar_vs_fixed_length_cycles():
+    rec = {r["merchant"]: r for r in detect_recurring(_rows_from(SIX))}
+    assert rec["Netflix"]["monthly_equivalent"] == 199.0
+    assert rec["Netflix"]["next_expected"] == "2026-10-15"           # same day next month
+    assert rec["Airtel Prepaid"]["interval_days"] == 28
+    assert rec["Airtel Prepaid"]["monthly_equivalent"] == round(299 * 30.44 / 28, 2)  # 28-day plan costs more per month
+
+
+def _stream(merchant, start, n, gap, amount=100.0, direction="debit", category="other"):
+    return [dict(txn_date=start + _td(days=i * gap), merchant=merchant, direction=direction,
+                 amount=amount, category=category) for i in range(n)]
+
+
+def test_needs_three_occurrences():
+    assert detect_recurring(_stream("Gym", _date(2026, 1, 5), 2, 30)) == []
+    assert len(detect_recurring(_stream("Gym", _date(2026, 1, 5), 3, 30))) == 1
+
+
+def test_cancelled_subscription_is_inactive():
+    txns = _stream("Hotstar", _date(2026, 1, 10), 4, 30) + _stream("Netflix", _date(2026, 1, 15), 9, 30)
+    rec = {r["merchant"]: r for r in detect_recurring(txns)}
+    assert rec["Netflix"]["active"] and not rec["Hotstar"]["active"]
+
+
+def test_weekly_and_unstable_amounts():
+    weekly = detect_recurring(_stream("Milkman", _date(2026, 3, 2), 8, 7, amount=210))
+    assert weekly[0]["cadence"] == "weekly" and weekly[0]["monthly_equivalent"] == round(210 * 52 / 12, 2)
+    wild = [dict(t, amount=a) for t, a in zip(_stream("Random", _date(2026, 1, 1), 5, 30), [50, 900, 120, 2000, 75])]
+    assert detect_recurring(wild) == []
+
+
+def test_income_attributes_early_salary_to_its_month():
+    income = detect_monthly_income(_rows_from(SIX))
+    assert income == {m: 45000.0 for m in ("2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09")}
+
+
+def test_income_from_single_month_uses_salary_keyword_not_refunds():
+    # one month: no recurrence possible; salary keyword still counts, refund/interest don't
+    assert detect_monthly_income(_rows_from("hdfc_style.csv")) == {"2026-09": 45000.0}
+
+
+def test_import_fills_income_and_links_budgets(conn):
+    rows = service.preview(conn, 2, SIX, _read(SIX))["rows"]  # user 2 has no budgets
+    r = service.confirm(conn, 2, rows)
+    assert r["income_set"] == {m: 45000.0 for m in ("2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09")}
+    budgets = conn.execute("SELECT month, monthly_income, income_source FROM monthly_budgets WHERE user_id = 2").fetchall()
+    assert len(budgets) == 6 and {b["income_source"] for b in budgets} == {"import"}
+    assert conn.execute("SELECT COUNT(*) FROM expense_entries WHERE user_id = 2 AND budget_id IS NULL").fetchone()[0] == 0
+    # SIP is investment, never a budget expense
+    sip = conn.execute("SELECT category, expense_id FROM bank_transactions WHERE user_id = 2 AND merchant = 'Zerodha Coin'").fetchall()
+    assert len(sip) == 6 and all(s["category"] == "investment" and s["expense_id"] is None for s in sip)
+
+
+def test_manual_income_is_never_overwritten(conn):
+    conn.execute("UPDATE monthly_budgets SET monthly_income = 52000, income_source = 'manual' WHERE id = 'b1'")  # user 1, Sep
+    r = service.confirm(conn, 1, service.preview(conn, 1, SIX, _read(SIX))["rows"])
+    assert "2026-09" not in r["income_set"] and r["income_kept_manual"] == ["2026-09"]
+    assert conn.execute("SELECT monthly_income FROM monthly_budgets WHERE id = 'b1'").fetchone()[0] == 52000
+
+
+def test_undo_reverts_import_set_income(conn):
+    r = service.confirm(conn, 2, service.preview(conn, 2, SIX, _read(SIX))["rows"])
+    service.undo_batch(conn, 2, r["batch_id"])
+    assert conn.execute("SELECT COALESCE(SUM(monthly_income), 0) FROM monthly_budgets WHERE user_id = 2").fetchone()[0] == 0
+
+
+def test_recurring_summary_totals(conn):
+    service.confirm(conn, 2, service.preview(conn, 2, SIX, _read(SIX))["rows"])
+    s = service.recurring_summary(conn, 2)
+    t = s["totals"]
+    assert s["months_of_history"] == 6 and t["income_monthly"] == 45000.0 and t["investments_monthly"] == 5000.0
+    fixed = {r["merchant"]: r["monthly_equivalent"] for r in s["recurring"]
+             if r["direction"] == "debit" and r["kind"] != "investment"}
+    assert t["fixed_outflow_monthly"] == round(sum(fixed.values()), 2)
+    assert "txn_ids" not in s["recurring"][0]

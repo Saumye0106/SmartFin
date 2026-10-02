@@ -17,6 +17,7 @@ from statement_import.categorizer import (
     ALL_CATEGORIES, EXPENSE_CATEGORIES, categorize, extract_merchant,
 )
 from statement_import.parser import ParsedTransaction, parse_statement
+from statement_import.recurring import detect_monthly_income, detect_recurring
 
 _HASH_PARAM_CHUNK = 500
 
@@ -184,6 +185,7 @@ def confirm(conn, user_id: int, raw_rows: list[dict]) -> dict:
             "ON CONFLICT(user_id, merchant) DO UPDATE SET category = excluded.category, updated_at = excluded.updated_at",
             (user_id, merchant, category, now),
         )
+    income = sync_income(conn, user_id, _touched_months(r["date"] for r in rows if r["include"]))
     conn.commit()
     return {
         "batch_id": batch_id,
@@ -192,19 +194,102 @@ def confirm(conn, user_id: int, raw_rows: list[dict]) -> dict:
         "excluded": excluded,
         "expenses_created": expenses,
         "rules_learned": len(learned),
+        **income,
     }
 
 
 def undo_batch(conn, user_id: int, batch_id: str) -> dict:
-    """Remove one import batch and the budget expenses it created."""
-    expense_ids = [r["expense_id"] for r in conn.execute(
-        "SELECT expense_id FROM bank_transactions WHERE user_id = ? AND import_batch_id = ? AND expense_id IS NOT NULL",
-        (user_id, batch_id))]
+    """Remove one import batch and the budget expenses it created; recompute import-set income."""
+    batch = conn.execute(
+        "SELECT txn_date, expense_id FROM bank_transactions WHERE user_id = ? AND import_batch_id = ?",
+        (user_id, batch_id)).fetchall()
+    expense_ids = [r["expense_id"] for r in batch if r["expense_id"]]
     for eid in expense_ids:
         conn.execute("DELETE FROM expense_entries WHERE id = ? AND user_id = ?", (eid, user_id))
     cur = conn.execute("DELETE FROM bank_transactions WHERE user_id = ? AND import_batch_id = ?", (user_id, batch_id))
+    if batch:
+        sync_income(conn, user_id, _touched_months(r["txn_date"] for r in batch))
     conn.commit()
     return {"transactions_removed": cur.rowcount, "expenses_removed": len(expense_ids)}
+
+
+def _touched_months(dates) -> set[str]:
+    """Months of the given dates plus each following month (salary paid early lands a month ahead)."""
+    out = set()
+    for d in dates:
+        y, m = int(d[:4]), int(d[5:7])
+        out.add(f"{y:04d}-{m:02d}")
+        out.add(f"{y + (m == 12):04d}-{m % 12 + 1:02d}")
+    return out
+
+
+def _user_txns(conn, user_id: int) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT id, txn_date, description, merchant, amount, direction, category "
+        "FROM bank_transactions WHERE user_id = ?", (user_id,))]
+
+
+def sync_income(conn, user_id: int, months: set[str]) -> dict:
+    """
+    Set monthly_budgets.monthly_income from detected salary for the given months.
+    Income the user typed (income_source 'manual' with a non-zero value) is never
+    touched; import-set income is kept in sync. Creates the budget row if missing
+    and links unlinked expenses of that month to it. Does not commit.
+    """
+    detected = detect_monthly_income(_user_txns(conn, user_id))
+    now = datetime.now().isoformat()
+    income_set: dict[str, float] = {}
+    kept_manual: list[str] = []
+    for month in sorted(months):
+        amount = detected.get(month, 0.0)
+        row = conn.execute(
+            "SELECT id, monthly_income, income_source FROM monthly_budgets WHERE user_id = ? AND month = ?",
+            (user_id, month)).fetchone()
+        if row is None:
+            if amount <= 0:
+                continue
+            budget_id = str(uuid.uuid4())
+            conn.execute(
+                "INSERT INTO monthly_budgets (id, user_id, month, monthly_income, planned_savings, created_at, "
+                "updated_at, income_source) VALUES (?,?,?,?,0,?,?,'import')",
+                (budget_id, user_id, month, amount, now, now))
+        else:
+            budget_id = row["id"]
+            manual = row["income_source"] != "import" and (row["monthly_income"] or 0) > 0
+            if manual:
+                if amount > 0:
+                    kept_manual.append(month)
+                continue
+            if (row["monthly_income"] or 0) == amount:
+                continue
+            conn.execute(
+                "UPDATE monthly_budgets SET monthly_income = ?, income_source = 'import', updated_at = ? WHERE id = ?",
+                (amount, now, budget_id))
+        income_set[month] = amount
+        conn.execute(
+            "UPDATE expense_entries SET budget_id = ? WHERE user_id = ? AND budget_id IS NULL "
+            "AND substr(expense_date, 1, 7) = ?", (budget_id, user_id, month))
+    return {"income_set": income_set, "income_kept_manual": kept_manual}
+
+
+def recurring_summary(conn, user_id: int) -> dict:
+    txns = _user_txns(conn, user_id)
+    recurring = detect_recurring(txns)
+    for r in recurring:
+        r.pop("txn_ids", None)
+    active = [r for r in recurring if r["active"]]
+    months = sorted({t["txn_date"][:7] for t in txns})
+    return {
+        "recurring": recurring,
+        "totals": {
+            "fixed_outflow_monthly": round(sum(r["monthly_equivalent"] for r in active
+                                               if r["direction"] == "debit" and r["kind"] != "investment"), 2),
+            "investments_monthly": round(sum(r["monthly_equivalent"] for r in active if r["kind"] == "investment"), 2),
+            "income_monthly": round(sum(r["monthly_equivalent"] for r in active if r["direction"] == "credit"), 2),
+        },
+        "months_of_history": len(months),
+        "as_of": max((t["txn_date"] for t in txns), default=None),
+    }
 
 
 def list_transactions(conn, user_id: int, month: str | None = None, limit: int = 500) -> list[dict]:

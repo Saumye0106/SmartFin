@@ -4,6 +4,7 @@ Statement Import Blueprint
   POST   /api/import/statement/preview   multipart: file, password (optional)
   POST   /api/import/statement/confirm   JSON: {rows: [...]} (rows from preview, edited)
   GET    /api/import/transactions        ?month=YYYY-MM
+  GET    /api/import/recurring           detected recurring payments/income + monthly totals
   DELETE /api/import/batch/<batch_id>    undo one import
 
 Uploaded files are read into memory and discarded; neither the file nor a
@@ -69,6 +70,12 @@ def list_transactions():
     rows = service.list_transactions(get_db(), int(get_jwt_identity()), month,
                                      request.args.get("limit", 500, type=int))
     return jsonify({"success": True, "transactions": rows, "count": len(rows)})
+
+
+@statement_import_bp.route("/recurring", methods=["GET"])
+@jwt_required()
+def recurring():
+    return jsonify({"success": True, **service.recurring_summary(get_db(), int(get_jwt_identity()))})
 
 
 @statement_import_bp.route("/batch/<batch_id>", methods=["DELETE"])

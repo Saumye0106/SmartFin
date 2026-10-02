@@ -132,7 +132,59 @@ def icici_pdf(path, password=None):
     ])
 
 
+def six_month_csv():
+    """
+    Apr-Sep 2026, HDFC layout. Recurring streams with realistic jitter:
+    salary (one month paid a day early), rent, loan EMI, SIP, Netflix,
+    a variable electricity bill, a 28-day prepaid recharge. Plus irregular
+    noise (food delivery, shopping, cabs) that must NOT be detected as recurring.
+    """
+    import random
+    from datetime import timedelta
+
+    rng = random.Random(7)
+    rows = []
+    for m in range(4, 10):
+        first = date(2026, m, 1)
+        salary_day = date(2026, m - 1, 30) if m == 6 else first
+        rows.append((salary_day, f"NEFT CR-HDFC0000001-ACME TECHNOLOGIES PVT LTD-SALARY {first:%b %Y}".upper(), 0, 45000.00))
+        rows.append((first + timedelta(days=rng.randint(0, 2)), f"UPI/42710000{m:04d}/RAMESH KUMAR/ramesh@oksbi/rent {first:%b}", 12000.00, 0))
+        rows.append((date(2026, m, 3), f"ACH D- BAJAJ FINANCE LTD-EMI 4501{m:02d}", 4707.35, 0))
+        rows.append((date(2026, m, 5), f"NACH-MF-ZERODHA COIN-SIP {first:%Y%b}".upper(), 5000.00, 0))
+        rows.append((date(2026, m, 15), f"UPI-NETFLIX-netflix@icici-ICIC0DC0099-4271{m:08d}", 199.00, 0))
+        rows.append((date(2026, m, rng.randint(8, 12)), f"BESCOM BILL PAYMENT-BILLDESK-{rng.randint(100000, 999999)}",
+                     round(rng.uniform(850, 1650), 2), 0))
+        for _ in range(rng.randint(4, 7)):
+            rows.append((date(2026, m, rng.randint(1, 28)),
+                         f"UPI-SWIGGY-swiggy.order@icici-ICIC0DC0099-{rng.randint(10**11, 10**12 - 1)}-Order",
+                         round(rng.uniform(150, 700), 2), 0))
+        for _ in range(rng.randint(0, 2)):
+            rows.append((date(2026, m, rng.randint(1, 28)), "POS 4512XXXXXX1234 AMAZON PAY INDIA",
+                         round(rng.uniform(300, 4000), 2), 0))
+        for _ in range(rng.randint(2, 4)):
+            rows.append((date(2026, m, rng.randint(1, 28)),
+                         f"UPI-UBER INDIA-uber@axisbank-UTIB0000100-{rng.randint(10**11, 10**12 - 1)}",
+                         round(rng.uniform(90, 450), 2), 0))
+    d = date(2026, 4, 3)
+    while d <= date(2026, 9, 30):  # prepaid plan: every 28 days, not calendar-monthly
+        rows.append((d, "UPI-AIRTEL PREPAID-airtel@ybl-recharge", 299.00, 0))
+        d += timedelta(days=28)
+
+    rows.sort(key=lambda r: r[0])
+    bal = OPENING_BALANCE
+    with open(HERE / "hdfc_style_6months.csv", "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["HDFC BANK Ltd. (SAMPLE - NOT A REAL STATEMENT) - 6 months"])
+        w.writerow([])
+        w.writerow(["Date", "Narration", "Chq./Ref.No.", "Value Dt", "Withdrawal Amt.", "Deposit Amt.", "Closing Balance"])
+        for i, (dt, n, dr, cr) in enumerate(rows):
+            bal = round(bal - dr + cr, 2)
+            ds = dt.strftime("%d/%m/%y")
+            w.writerow([ds, n, f"{500000000000 + i:016d}", ds, _fmt(dr), _fmt(cr), _fmt(bal)])
+
+
 if __name__ == "__main__":
+    six_month_csv()
     hdfc_csv()
     sbi_xlsx()
     axis_csv()

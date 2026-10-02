@@ -38,6 +38,10 @@ def create_tables(db_path: str) -> None:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(expense_entries)")}
         if cols and "source" not in cols:
             conn.execute("ALTER TABLE expense_entries ADD COLUMN source TEXT DEFAULT 'manual'")
+        # 'manual' income is never overwritten by imports; 'import' income is kept in sync with imported salary.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(monthly_budgets)")}
+        if cols and "income_source" not in cols:
+            conn.execute("ALTER TABLE monthly_budgets ADD COLUMN income_source TEXT DEFAULT 'manual'")
         conn.commit()
     finally:
         conn.close()

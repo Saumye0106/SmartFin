@@ -4,6 +4,7 @@ import Sidebar from './Sidebar';
 import SmartFinFooter from './SmartFinFooter';
 import api from '../services/api';
 import StatementImport from './StatementImport';
+import RecurringPayments from './RecurringPayments';
 
 const CATEGORY_OPTIONS = [
   'rent',
@@ -64,6 +65,7 @@ function BudgetManager() {
   const [sortBy, setSortBy] = useState('date-desc');
   const [groupBy, setGroupBy] = useState(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [importVersion, setImportVersion] = useState(0);
 
   const guidanceList = useMemo(() => {
     if (!analysisResult?.guidance) return [];
@@ -176,6 +178,7 @@ function BudgetManager() {
   }, [month]);
 
   const handleImported = (statementMonth) => {
+    setImportVersion((v) => v + 1);
     if (statementMonth && statementMonth !== month) setMonth(statementMonth);
     else fetchMonthData(month);
   };
@@ -456,6 +459,8 @@ function BudgetManager() {
               <div className="text-xl font-semibold mt-1">{formatINR(summary?.auto_calculated_savings)}</div>
             </div>
           </div>
+
+          <RecurringPayments refreshKey={importVersion} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <section className="rounded-2xl border border-white/10 bg-black/30 p-6">

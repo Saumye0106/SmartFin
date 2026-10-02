@@ -221,6 +221,17 @@ export default function StatementImport({ open, onClose, onImported }) {
                 {result.excluded > 0 && ` · ${result.excluded} excluded`}
                 {result.rules_learned > 0 && ` · learned ${result.rules_learned} category rule${result.rules_learned > 1 ? 's' : ''}`}
               </div>
+              {Object.keys(result.income_set || {}).length > 0 && (
+                <div className="text-sm text-white/70">
+                  Monthly income filled in from your salary credits:{' '}
+                  {Object.entries(result.income_set).map(([m, v]) => `${m} ${formatINR(v)}`).join(' · ')}
+                </div>
+              )}
+              {(result.income_kept_manual || []).length > 0 && (
+                <div className="text-xs text-white/45">
+                  Kept the income you entered yourself for {result.income_kept_manual.join(', ')}.
+                </div>
+              )}
             </div>
           )}
         </div>

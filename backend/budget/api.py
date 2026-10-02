@@ -53,7 +53,7 @@ def upsert_monthly_budget():
             execute_query(
                 '''
                 UPDATE monthly_budgets
-                SET monthly_income = ?, planned_savings = ?, updated_at = ?
+                SET monthly_income = ?, planned_savings = ?, updated_at = ?, income_source = 'manual'
                 WHERE id = ?
                 ''',
                 (monthly_income, planned_savings, now_iso, budget_id),
