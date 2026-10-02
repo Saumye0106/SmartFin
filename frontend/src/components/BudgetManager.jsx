@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import SmartFinFooter from './SmartFinFooter';
 import api from '../services/api';
+import StatementImport from './StatementImport';
 
 const CATEGORY_OPTIONS = [
   'rent',
@@ -62,6 +63,7 @@ function BudgetManager() {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [sortBy, setSortBy] = useState('date-desc');
   const [groupBy, setGroupBy] = useState(null);
+  const [importOpen, setImportOpen] = useState(false);
 
   const guidanceList = useMemo(() => {
     if (!analysisResult?.guidance) return [];
@@ -172,6 +174,11 @@ function BudgetManager() {
   useEffect(() => {
     fetchMonthData(month);
   }, [month]);
+
+  const handleImported = (statementMonth) => {
+    if (statementMonth && statementMonth !== month) setMonth(statementMonth);
+    else fetchMonthData(month);
+  };
 
   const handleSaveBudget = async (e) => {
     e.preventDefault();
@@ -408,6 +415,13 @@ function BudgetManager() {
               <p className="text-white/50 max-w-2xl">Track monthly budgets, log expenses, and run analysis from real spending data.</p>
             </div>
             <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setImportOpen(true)}
+                className="rounded-lg bg-gradient-to-r from-emerald-500 to-emerald-600 px-4 py-2 text-sm font-medium text-black"
+              >
+                Import bank statement
+              </button>
               <label className="text-xs text-white/60">Month</label>
               <input
                 type="month"
@@ -421,6 +435,8 @@ function BudgetManager() {
           {error && (
             <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>
           )}
+
+          <StatementImport open={importOpen} onClose={() => setImportOpen(false)} onImported={handleImported} />
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="rounded-xl border border-white/10 bg-black/30 p-4">

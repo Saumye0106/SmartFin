@@ -865,6 +865,51 @@ const api = {
     }
   },
 
+  // ==================== STATEMENT IMPORT ====================
+  async previewStatement(file, password = '') {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    const form = new FormData();
+    form.append('file', file);
+    if (password) form.append('password', password);
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/import/statement/preview`, form, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      const err = new Error(error?.response?.data?.error || 'Failed to read statement');
+      err.passwordRequired = Boolean(error?.response?.data?.password_required);
+      throw err;
+    }
+  },
+
+  async confirmStatementImport(rows) {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/import/statement/confirm`, { rows }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error?.response?.data?.error || 'Failed to import transactions');
+    }
+  },
+
+  async undoStatementImport(batchId) {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    try {
+      const response = await axios.delete(`${API_BASE_URL}/api/import/batch/${batchId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error?.response?.data?.error || 'Failed to undo import');
+    }
+  },
+
   // ==================== CHAT AGENT ====================
   async sendChatMessage(message, sessionId = null) {
     try {

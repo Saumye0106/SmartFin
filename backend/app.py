@@ -82,6 +82,8 @@ from loans.api import loans_bp
 from chat.api import chat_bp
 from calculators.api import calculators_bp
 from legacy_scorer.api import legacy_scorer_bp
+from statement_import.api import statement_import_bp
+from statement_import.migrations import create_tables as create_statement_import_tables
 from legacy_scorer.model import model_data, model_metadata
 
 from db_core import DB_PATH, get_db, close_connection, execute_query, row_to_dict, rows_to_list
@@ -339,6 +341,7 @@ def init_db():
     
     # Initialize retirement planning tables
     RetirementPlanningMigrations.create_tables(DB_PATH)
+    create_statement_import_tables(DB_PATH)
 
 # Initialize database
 init_db()
@@ -351,6 +354,7 @@ app.register_blueprint(loans_bp)
 app.register_blueprint(chat_bp)
 app.register_blueprint(calculators_bp)
 app.register_blueprint(legacy_scorer_bp)
+app.register_blueprint(statement_import_bp)
 
 
 # ==================== RUN SERVER ====================
