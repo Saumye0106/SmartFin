@@ -91,10 +91,11 @@ smartfin-copy/
 │   ├── statement_import/               ← Bank statement import (CSV/XLS/XLSX/PDF) → categorized transactions → budget expenses
 │   │   ├── parser.py                   ← Keyword-based header/column detection (bank-agnostic), day-first dates, PDF passwords
 │   │   ├── categorizer.py              ← Merchant extraction from UPI/NEFT/IMPS/POS narrations + Indian-merchant rulebook + user rules
-│   │   ├── service.py                  ← preview → confirm → undo; dedupe hashes; learns per-user merchant→category rules
+│   │   ├── service.py                  ← preview → confirm → undo; dedupe hashes; learned rules; sync_income; recurring_summary
+│   │   ├── recurring.py                ← Recurring-stream detection (gap cadence + amount stability) and salary-income per month
 │   │   ├── api.py                      ← Blueprint at /api/import/
 │   │   └── migrations.py               ← bank_transactions, merchant_category_overrides, expense_entries.source
-│   ├── unit_test/fixtures/statements/  ← SAMPLE statements (HDFC/SBI/Axis/ICICI layouts, protected PDF) + make_fixtures.py
+│   ├── unit_test/fixtures/statements/  ← SAMPLE statements (HDFC/SBI/Axis/ICICI layouts, protected PDF, 6-month HDFC) + make_fixtures.py
 │   ├── retirement_planning/            ← Isolated domain package for retirement workflows
 │   │   ├── api.py                      ← Blueprint at /api/retirement/
 │   │   └── migrations.py              ← Creates retirement DB tables on startup
@@ -128,6 +129,7 @@ smartfin-copy/
 │   │   ├── RetirementPlanner.jsx       ← Main orchestrator (13 retirement components total)
 │   │   ├── ChatAgent.jsx               ← Chat UI — supports tool widgets (score, loans, goals)
 │   │   ├── StatementImport.jsx         ← Import modal (opened from BudgetManager): upload → password → preview/edit → import → undo
+│   │   ├── RecurringPayments.jsx       ← Budget-page card: detected income / fixed costs / investing per month + each stream
 │   │   └── ...                         ← All other existing components UNTOUCHED
 │   └── services/api.js                 ← Axios client — has generic api.get() / api.post()
 ├── data/
@@ -344,6 +346,9 @@ bank_transactions (id PK UUID, user_id FK, txn_date 'YYYY-MM-DD', description, m
                    import_batch_id, txn_hash, created_at, UNIQUE(user_id, txn_hash))
 merchant_category_overrides (user_id, merchant (lowercase), category, updated_at, PK(user_id, merchant))  ← learned from user corrections
 -- expense_entries.source: 'manual' (default) | 'import'
+-- monthly_budgets.income_source: 'manual' (default; set by the budget form) | 'import' (filled from salary credits).
+--   Imports never overwrite non-zero 'manual' income; 'import' income is re-synced on every import/undo.
+-- bank_transactions.category also allows 'income', 'transfer', 'investment' (never become expenses)
 ```
 
 ### Chat
@@ -404,7 +409,9 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - `POST /statement/preview` — multipart `file` (+ optional `password`) → parsed rows with suggested categories and duplicate flags. 422 + `password_required` for locked PDFs
 - `POST /statement/confirm` — `{rows}` (all preview rows, edited; `include:false` to skip) → imports, creates budget expenses for debits, learns category corrections
 - `GET /transactions?month=YYYY-MM` — imported transactions
-- `DELETE /batch/<batch_id>` — undo one import (removes its transactions and the expenses it created)
+- `GET /recurring` — detected recurring streams (kind, cadence, typical/monthly amount, next date, active) + monthly totals (income / fixed costs / investing)
+- `DELETE /batch/<batch_id>` — undo one import (removes its transactions and the expenses it created, re-syncs import-set income)
+- `confirm` also returns `income_set` {month: amount} and `income_kept_manual` [months]
 
 ### Nudge Engine (prefix: `/api/nudges`)
 - `POST /scan`, `GET /history`, `GET /patterns`
@@ -484,7 +491,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - [x] ~~Fix marshmallow bug in `POST /api/profile/goals`~~ — done 2026-10-02 (§15 #27)
 - [ ] **ACTIVE ROADMAP — automatic data entry → Financial Digital Twin** (agreed 2026-10-02). Manual entry is why finance apps get abandoned, and the digital twin needs real history:
   1. [x] **Bank statement import** (CSV/XLS/XLSX/PDF incl. password-protected) → preview → categorize → budget expenses. Done 2026-10-02, see §15 #38–#44. ⚠️ Built and tested on SAMPLE statements only; validate with a real, redacted statement from the user before relying on it for a given bank.
-  2. [ ] **Recurring detection + income** — find rent/subscriptions/SIPs/salary in `bank_transactions` (merchant + interval + amount clustering); set `monthly_budgets.monthly_income` from detected salary (today an import leaves Income = ₹0).
+  2. [x] **Recurring detection + income** — done 2026-10-02 (§15 #45–#49). Rent/EMI/SIP/bills/salary detected from ≥3 occurrences; monthly income filled from salary credits; new `investment` category; Recurring payments card on the Budget page.
   3. [ ] **Credit report → loans** (CIBIL/Experian PDF lists every loan with EMI, outstanding, payment history) and **CAS → mutual funds** (`casparser` library).
   4. [ ] **Chat quick-entry** — `add_expense` tool on the chat agent ("spent 450 on lunch").
   5. [ ] **Financial Digital Twin** — safe-to-spend, goal-success probability (Monte Carlo on the user's own history), personal inflation, what-if sliders (see Feature ideas backlog #1–#2).
@@ -640,12 +647,23 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 | 43 | Include/exclude checkboxes were invisible | `ProfileEditForm.css` globally sets `appearance:none` on all checkboxes and only styles the checked state | Explicit size/border classes on the new checkboxes; documented as gotcha §14 #13 | Playwright screenshot review |
 | 44 | Git would corrupt the binary PDF fixtures (and `.pkl` models) on checkout | `core.autocrlf=true`, no `.gitattributes`, so git treated the PDFs as text | `.gitattributes` marking binaries; verified by deleting and re-checking-out the fixtures and rerunning tests | Git's "LF will be replaced by CRLF" warning on commit |
 
+### Session 2026-10-02 (cont.) — automatic data entry, Phase 2: recurring payments + income (`main`)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 45 | After importing, the budget still showed Income ₹0 | Imported credits were stored but nothing turned salary into budget income | `detect_monthly_income` (monthly income streams + salary/stipend/payroll narrations; refunds, cashback and interest excluded) → `sync_income` fills budgets on import, re-syncs on undo. `income_source` column so typed income is never overwritten | Phase 1 browser test (Income ₹0) |
+| 46 | SIPs would be booked as loan EMIs | NACH mandates collect both SIPs and loan EMIs, and the rulebook matched "nach" → `emi` | New non-expense `investment` category checked before `emi` (SIP/MF/Zerodha/Groww/Kuvera/NPS/PPF/RD); "RD installment" moved there from "transfer" | Designing the 6-month sample |
+| 47 | Monthly totals off (salary ₹44,187/mo) and next dates drifting (Netflix 15th → 16th) | Scaled every stream by 30.44/median-gap and added the median gap to the last date | Calendar-monthly streams (median gap ≥29 days) count 1×/month and repeat on the same day next month (month-end clamped, leap-safe); fixed-length cycles (28-day prepaid) are scaled | First run on the 6-month sample |
+| 48 | Salary paid on 30 May made May ₹90,000 and June ₹0 | Income attributed by credit date | A payer's credit in the last 5 days of a month, with none from that payer next month, counts toward next month; `_touched_months` includes following months so June's budget gets it | Same run |
+| 49 | Heredoc patch commands failed with "unexpected EOF" | The shell tool chokes on apostrophes inside heredoc bodies (e.g. "month's"), even with a quoted delimiter | Write patch scripts to the session scratchpad with the Write tool and run them | Tooling; nothing had been modified, which was confirmed with `git diff --stat` |
+
 ---
 
 ## 16. Change Log (most recent first)
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-02 | Claude Code (Opus 5.5) | Phase 2 of automatic data entry: recurring-payment detection (`statement_import/recurring.py`, `GET /api/import/recurring`, `RecurringPayments.jsx` card), salary-based monthly income fill with `monthly_budgets.income_source` (manual income never overwritten; undo re-syncs), new `investment` category for SIPs/MFs. New 6-month sample statement; 11 new tests (55 total pass); browser-verified: income ₹45,000 filled for 6 months, exactly 7 real streams detected, 0 console errors |
 | 2026-10-02 | Claude Code (Opus 5.5) | Phase 1 of automatic data entry: bank statement import (`backend/statement_import/`, `StatementImport.jsx`, button on the Budget page). Bank-agnostic CSV/XLS/XLSX/PDF parser (password-protected PDFs), Indian-merchant categorizer + learned user corrections, hash-based dedupe, server-side re-validation, undo. New tables `bank_transactions`, `merchant_category_overrides`, column `expense_entries.source`. 32 new tests on generated sample statements (44/44 total pass); verified live with curl + two Playwright runs. Added `.gitattributes`. Roadmap phases 2–6 recorded in §12 |
 | 2026-10-02 | Claude Code (Opus 5.5) | Portfolio Optimizer data quality: Mid/Small-cap → NIFTY indices, Silver → COMEX×USD/INR, Debt → liquid-fund growth NAV (mfapi.in), giving 7–23 years per asset. Cleaned unadjusted splits / NAV rescale / partial months. Expected returns shrunk toward a risk-based prior; covariance from weekly returns. Risk scores 3–10 now map evenly along the frontier (risk 9 was safer than risk 7). Retrained: 8/9 models, R² −0.47, ML weight 0. Verified live: all 4 endpoints, monotonic risk 1→10 (0.3%→15.4% vol), Playwright UI check with 0 console errors. §15 #30–#37 |
 | 2026-10-02 | Claude Code (Opus 5.5) | Merged `refactor/app-blueprints` (fast-forward) and `feature/portfolio-real-data` (`--no-ff`, only AGENTS.md conflicted) into `main`. Fixed goal creation (marshmallow 4 `data_key` kwarg; all `@validates` methods now take `**kwargs`; pin relaxed to `>=3.23.2,<5`). Fixed the portfolio personalizer to read the real schema (`monthly_budgets`, `loans`, `financial_goals`, `expense_entries`) and log lookup failures instead of swallowing them; all 4 rules verified firing on real data for the first time. Corrected the §6 budget-table schema docs. Added §15 entries #23–#29. Next: Nudge Engine audit |
