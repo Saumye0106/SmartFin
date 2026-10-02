@@ -47,6 +47,7 @@ START_SMARTFIN.bat     # from workspace root — spawns both terminals + browser
 - `scikit-learn==1.9.1`, `xgboost==3.4.1`, `scipy==1.18.1`
 - `numpy`, `pandas`, `joblib`, `boto3`, `twilio`, `requests`, `python-dotenv`
 - `yfinance` (Portfolio Optimizer real data), `pytest==8.3.4` (installed 2026-09-30; was in requirements.txt but missing)
+- `pdfplumber`, `openpyxl`, `xlrd` (statement import: PDF / XLSX / XLS). `reportlab` is dev-only, used by `unit_test/fixtures/statements/make_fixtures.py` to generate sample PDFs; not in requirements.txt.
 - `marshmallow` **4.3.1** is installed even though requirements.txt used to pin 3.23.2. The pin is now `>=3.23.2,<5` and validators are written to work on both (see §15 #27). Installed versions generally drift ahead of `requirements.txt` (e.g. scikit-learn 1.9.1 vs pinned 1.8.0), so check `pip show <pkg>` before assuming the pinned version is what runs.
 
 ---
@@ -87,6 +88,13 @@ smartfin-copy/
 │   ├── twilio_service.py               ← SMS/OTP integration
 │   ├── validation_schemas.py           ← Marshmallow input validation — has a known bug, see §14 item 8
 │   ├── db_utils.py                     ← Loan-table-specific DB helpers (separate from db_core.py). Any SQL that interpolates a table name must go through `_safe_table_identifier()` (allowlist: `LOAN_TABLES`)
+│   ├── statement_import/               ← Bank statement import (CSV/XLS/XLSX/PDF) → categorized transactions → budget expenses
+│   │   ├── parser.py                   ← Keyword-based header/column detection (bank-agnostic), day-first dates, PDF passwords
+│   │   ├── categorizer.py              ← Merchant extraction from UPI/NEFT/IMPS/POS narrations + Indian-merchant rulebook + user rules
+│   │   ├── service.py                  ← preview → confirm → undo; dedupe hashes; learns per-user merchant→category rules
+│   │   ├── api.py                      ← Blueprint at /api/import/
+│   │   └── migrations.py               ← bank_transactions, merchant_category_overrides, expense_entries.source
+│   ├── unit_test/fixtures/statements/  ← SAMPLE statements (HDFC/SBI/Axis/ICICI layouts, protected PDF) + make_fixtures.py
 │   ├── retirement_planning/            ← Isolated domain package for retirement workflows
 │   │   ├── api.py                      ← Blueprint at /api/retirement/
 │   │   └── migrations.py              ← Creates retirement DB tables on startup
@@ -119,12 +127,15 @@ smartfin-copy/
 │   │   ├── MainDashboard.jsx           ← OLD dashboard with ScoreDisplay (still active)
 │   │   ├── RetirementPlanner.jsx       ← Main orchestrator (13 retirement components total)
 │   │   ├── ChatAgent.jsx               ← Chat UI — supports tool widgets (score, loans, goals)
+│   │   ├── StatementImport.jsx         ← Import modal (opened from BudgetManager): upload → password → preview/edit → import → undo
 │   │   └── ...                         ← All other existing components UNTOUCHED
 │   └── services/api.js                 ← Axios client — has generic api.get() / api.post()
 ├── data/
 │   ├── combined_dataset.csv            ← 52,424 records for health scorer training
 │   ├── enhanced_model.pkl              ← Re-trained GradientBoosting (sklearn 1.9.1, R²=95.88%)
 │   └── train_enhanced_model.py         ← Script to retrain enhanced_model.pkl
+├── STANDALONE_APP_IDEAS.md             ← Saved ideas for separate apps (EMI decoder, scam checker, …)
+├── .gitattributes                      ← Marks pdf/xlsx/xls/pkl/images binary (autocrlf=true would corrupt them)
 ├── AGENTS.md                           ← ← THIS FILE — update after every change
 └── docs/                               ← ← DELETED — all context consolidated here
 ```
@@ -326,6 +337,15 @@ retirement_action_plans ← prioritized recommendations per plan
 retirement_plan_history  ← plan version snapshots for comparison
 ```
 
+### Statement import (created at startup by `statement_import/migrations.py`)
+```sql
+bank_transactions (id PK UUID, user_id FK, txn_date 'YYYY-MM-DD', description, merchant, amount CHECK(>0),
+                   direction CHECK(debit|credit), balance, category, expense_id (→ expense_entries, nullable),
+                   import_batch_id, txn_hash, created_at, UNIQUE(user_id, txn_hash))
+merchant_category_overrides (user_id, merchant (lowercase), category, updated_at, PK(user_id, merchant))  ← learned from user corrections
+-- expense_entries.source: 'manual' (default) | 'import'
+```
+
 ### Chat
 ```sql
 chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, updated_at)
@@ -379,6 +399,12 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 
 ### Portfolio Optimizer (prefix: `/api/portfolio`)
 - `POST /optimize`, `GET /frontier`, `GET /model-info`, `POST /whatif`
+
+### Statement Import (prefix: `/api/import`)
+- `POST /statement/preview` — multipart `file` (+ optional `password`) → parsed rows with suggested categories and duplicate flags. 422 + `password_required` for locked PDFs
+- `POST /statement/confirm` — `{rows}` (all preview rows, edited; `include:false` to skip) → imports, creates budget expenses for debits, learns category corrections
+- `GET /transactions?month=YYYY-MM` — imported transactions
+- `DELETE /batch/<batch_id>` — undo one import (removes its transactions and the expenses it created)
 
 ### Nudge Engine (prefix: `/api/nudges`)
 - `POST /scan`, `GET /history`, `GET /patterns`
@@ -456,7 +482,15 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - [x] ~~Fix `portfolio_optimizer/personalizer.py` DB queries~~ — done 2026-10-02, all 4 rules verified firing on real data (§15 #28)
 - [x] ~~Merge `refactor/app-blueprints` and `feature/portfolio-real-data` into `main`~~ — done 2026-10-02 (§15 #26)
 - [x] ~~Fix marshmallow bug in `POST /api/profile/goals`~~ — done 2026-10-02 (§15 #27)
-- [ ] **Deferred by user (2026-10-02, "I'll come back to this"):** the Portfolio Optimizer's XGBoost return predictor has R² −0.47 and 0% influence, so it currently adds nothing. Plan: (1) replace it with a next-month **volatility** predictor (volatility clustering is genuinely predictable; it feeds the covariance, so ML would actually move allocations); (2) add a **walk-forward backtest** (rebuild yearly on past-only data; compare return/vol/max drawdown vs all-Nifty and 60/40), run with and without the vol model.
+- [ ] **ACTIVE ROADMAP — automatic data entry → Financial Digital Twin** (agreed 2026-10-02). Manual entry is why finance apps get abandoned, and the digital twin needs real history:
+  1. [x] **Bank statement import** (CSV/XLS/XLSX/PDF incl. password-protected) → preview → categorize → budget expenses. Done 2026-10-02, see §15 #38–#44. ⚠️ Built and tested on SAMPLE statements only; validate with a real, redacted statement from the user before relying on it for a given bank.
+  2. [ ] **Recurring detection + income** — find rent/subscriptions/SIPs/salary in `bank_transactions` (merchant + interval + amount clustering); set `monthly_budgets.monthly_income` from detected salary (today an import leaves Income = ₹0).
+  3. [ ] **Credit report → loans** (CIBIL/Experian PDF lists every loan with EMI, outstanding, payment history) and **CAS → mutual funds** (`casparser` library).
+  4. [ ] **Chat quick-entry** — `add_expense` tool on the chat agent ("spent 450 on lunch").
+  5. [ ] **Financial Digital Twin** — safe-to-spend, goal-success probability (Monte Carlo on the user's own history), personal inflation, what-if sliders (see Feature ideas backlog #1–#2).
+  6. [ ] **Account Aggregator sandbox** (Setu) — consent flow; the production path (real AA access needs a regulated FIU).
+  - Rules: parse in memory, never store files or passwords; always preview before saving; no claimed ML accuracy — categorization is rules + learned user corrections; train a classifier only once real corrections exist.
+- [ ] **Deferred by user (2026-10-02
 - [ ] **NEXT:** audit the Nudge Engine the way the Portfolio Optimizer was audited — does it run on real user data or demo-seeded spikes, does the Isolation Forest result hold up, is anything fabricated or silently broken?
 - [ ] Replace `MainDashboard.jsx` health score widget with Portfolio Summary card (optional)
 - [ ] Full removal of old scorer — `financial_health_scorer.py`, `ScoreDisplay.jsx`, `/api/predict` (optional)
@@ -495,6 +529,7 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 | Why GradientBoosting? | Handles non-linear financial relationships, robust to missing data, excellent feature importance analysis |
 | How is security handled? | JWT auth, hashed passwords (werkzeug/bcrypt), protected routes, ownership checks, OTP/email verification |
 | How do you prevent SQL injection? | Every query with user input uses `?` parameter binding, so values never become SQL. The few dynamically built queries only interpolate fixed column literals or `?` placeholder lists. Table names (which can't be bound) go through an allowlist check, `_safe_table_identifier()` in `db_utils.py`. Inputs are also type-cast (`float`/`int`/`strptime`), categories are allowlisted, and every update/delete is scoped with `AND user_id = ?` |
+| How do users get data in without typing everything? | Upload a bank/UPI statement (CSV/Excel/PDF, even password-protected). A bank-agnostic parser finds the transaction table by column meaning, a rulebook of Indian merchants categorizes UPI narrations, the user reviews a preview, and corrections are learned per merchant. Re-uploads are de-duplicated by transaction hash; any import can be undone. Production path: RBI's Account Aggregator framework |
 | How does what-if work? | Backend predicts both current and modified scenarios, returns score delta and impact label |
 | How is explainability addressed? | Return classification labels, financial ratios, warnings, and guidance alongside prediction |
 | Is this just ML demo? | No — complete user journey: auth, profile, budget, loans, goals, retirement planner, AI chat assistant |
@@ -515,6 +550,10 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 10. **Portfolio Optimizer re-fetch cadence:** the data files are snapshots. Re-run `fetch_real_data.py` + `train_model.py` periodically (needs internet: Yahoo Finance + mfapi.in). REIT is the only short history (2019+); its mean leans on the prior until it accrues more. If Yahoo changes a ticker or mfapi.in is down, `fetch_and_save()` raises and leaves the old CSVs untouched rather than writing partial data.
 11. **Windows dev gotchas (from the verification runs):** use `C:\Python314\python.exe` explicitly, because a bare `python3` resolves to the Microsoft Store stub (exit code 49). `/tmp/...` paths inside Python on Windows don't match Git Bash's `/tmp`, so write scratch files to the working dir or the session scratchpad. To stop the dev servers, find the PID with `netstat -ano | grep :5000` and run `taskkill //PID <pid> //F`; `kill %1` doesn't reliably stop the Python child process.
 12. **IDE red squiggles on `flask`/`flask_jwt_extended` imports** — the editor's Python language server doesn't know packages live in `C:\Users\saumy\AppData\Roaming\Python\Python314\site-packages` (see item 1). Fixed via `.vscode/settings.json` → `"python.defaultInterpreterPath": "C:\\Python314\\python.exe"`. If squiggles persist, reload the window or run "Python: Select Interpreter" and pick that path manually. Purely cosmetic — doesn't affect running the app.
+13. **Global checkbox CSS:** `frontend/src/components/ProfileEditForm.css` sets `input[type="checkbox"] { appearance: none }` globally (Vite bundles it app-wide) and only styles the checked state. Any checkbox without explicit size/border classes is **invisible** when unchecked. Give new checkboxes classes like `w-4 h-4 rounded border border-white/30 bg-white/5` (as `StatementImport.jsx` does), or scope that rule to the profile form.
+14. **Binary files and git:** `core.autocrlf=true`. `.gitattributes` marks pdf/xlsx/xls/pkl/images as binary. Add new binary extensions there, or git will CRLF-convert and corrupt them on checkout.
+15. **Statement import is validated on SAMPLE files only** (`unit_test/fixtures/statements/`, generated, labelled as samples). Before trusting a new bank's format, test with a real redacted statement. The parser raises a clear error if it can't find the transaction table rather than guessing.
+16. **The 422 on `/api/import/statement/preview` is intentional** (password-protected PDF). The browser logs it as a console error; it isn't a JS error.
 
 ---
 
@@ -589,12 +628,25 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 | 36 | **Risk 9 portfolio was less risky than risk 7** | Risk 9–10 mapped to Max-Sharpe, which sits mid-frontier. Hidden earlier because inflated Silver put Max-Sharpe at the top | Risk 3–10 now map evenly along the frontier; volatility verified monotonic from 0.3% (risk 1) to 15.4% (risk 10) | Printed all 10 risk scores after the data change |
 | 37 | UI said "via yfinance" and listed FD as "not enough history" | Debt now comes from mfapi.in; FD is skipped as a constant, not for lack of data | Banner lists source types and years of history; skipped assets show their actual reason | Playwright screenshot review |
 
+### Session 2026-10-02 (cont.) — automatic data entry, Phase 1: bank statement import (`main`)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 38 | Users must type every expense and loan by hand | No import path existed; manual entry kills adoption | Statement import (CSV/XLS/XLSX/PDF) with preview, auto-categorization, dedupe and undo | User raised it while discussing the digital twin |
+| 39 | Every bank's statement layout is different | No shared format (HDFC/SBI/Axis/ICICI differ in headers, date formats, Dr/Cr style, preambles, wrapped rows) | One parser that finds the header row by keyword and maps columns by meaning; day-first dates only; header rows repeated per PDF page skipped; continuation rows rejoined | Designed up front; tested on 4 layouts + a protected PDF, all matching totals exactly |
+| 40 | Missing/wrong PDF password produced "Could not open the PDF" instead of a password prompt | pdfplumber wraps pdfminer's `PDFPasswordIncorrect` in its own exception | Detect the wrapped cause → `StatementPasswordRequired` → API 422 + `password_required` → UI shows a password field | First fixture run |
+| 41 | `emi` matched "pr**emi**um", `rent` matched "cur**rent**", masked card numbers leaked into merchant names | Substring matching; no token filtering | Whole-word keyword matching; drop tokens with 3+ digits or `XXX` masking | Hand-checked categorization of realistic narrations before writing tests |
+| 42 | Re-uploading the same period (even as a different file type) would double-count, but two real ₹568 Zomato orders on the same day must both count | Need stable identity without a bank-provided transaction ID | SHA-256 of date, direction, amount, normalized description and balance, plus an occurrence counter within a file. `UNIQUE(user_id, txn_hash)` + `INSERT OR IGNORE`. The client sends all rows back so the server recomputes identical hashes | Tests: same data as CSV then PDF → 19/19 flagged; identical Zomato rows kept |
+| 43 | Include/exclude checkboxes were invisible | `ProfileEditForm.css` globally sets `appearance:none` on all checkboxes and only styles the checked state | Explicit size/border classes on the new checkboxes; documented as gotcha §14 #13 | Playwright screenshot review |
+| 44 | Git would corrupt the binary PDF fixtures (and `.pkl` models) on checkout | `core.autocrlf=true`, no `.gitattributes`, so git treated the PDFs as text | `.gitattributes` marking binaries; verified by deleting and re-checking-out the fixtures and rerunning tests | Git's "LF will be replaced by CRLF" warning on commit |
+
 ---
 
 ## 16. Change Log (most recent first)
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-02 | Claude Code (Opus 5.5) | Phase 1 of automatic data entry: bank statement import (`backend/statement_import/`, `StatementImport.jsx`, button on the Budget page). Bank-agnostic CSV/XLS/XLSX/PDF parser (password-protected PDFs), Indian-merchant categorizer + learned user corrections, hash-based dedupe, server-side re-validation, undo. New tables `bank_transactions`, `merchant_category_overrides`, column `expense_entries.source`. 32 new tests on generated sample statements (44/44 total pass); verified live with curl + two Playwright runs. Added `.gitattributes`. Roadmap phases 2–6 recorded in §12 |
 | 2026-10-02 | Claude Code (Opus 5.5) | Portfolio Optimizer data quality: Mid/Small-cap → NIFTY indices, Silver → COMEX×USD/INR, Debt → liquid-fund growth NAV (mfapi.in), giving 7–23 years per asset. Cleaned unadjusted splits / NAV rescale / partial months. Expected returns shrunk toward a risk-based prior; covariance from weekly returns. Risk scores 3–10 now map evenly along the frontier (risk 9 was safer than risk 7). Retrained: 8/9 models, R² −0.47, ML weight 0. Verified live: all 4 endpoints, monotonic risk 1→10 (0.3%→15.4% vol), Playwright UI check with 0 console errors. §15 #30–#37 |
 | 2026-10-02 | Claude Code (Opus 5.5) | Merged `refactor/app-blueprints` (fast-forward) and `feature/portfolio-real-data` (`--no-ff`, only AGENTS.md conflicted) into `main`. Fixed goal creation (marshmallow 4 `data_key` kwarg; all `@validates` methods now take `**kwargs`; pin relaxed to `>=3.23.2,<5`). Fixed the portfolio personalizer to read the real schema (`monthly_budgets`, `loans`, `financial_goals`, `expense_entries`) and log lookup failures instead of swallowing them; all 4 rules verified firing on real data for the first time. Corrected the §6 budget-table schema docs. Added §15 entries #23–#29. Next: Nudge Engine audit |
 | 2026-09-30 | Claude Code (Opus 5.5) | SQL-injection audit of the whole backend: no live risk (all user input uses `?` binding; see the Q&A row in §13). Hardened the one theoretical gap: the `db_utils.py` helpers interpolated table names into SQL with f-strings (safe only because the names were hardcoded). Added a `LOAN_TABLES` allowlist and a `_safe_table_identifier()` validator that raises on anything else, plus a regression test in `unit_test/test_loan_schema.py` (12/12 pass). Installed `pytest==8.3.4`, which was already in requirements.txt but missing locally |
