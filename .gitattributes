@@ -1,0 +1,11 @@
+# Never line-ending-convert binary files (core.autocrlf=true would corrupt them on checkout).
+*.pdf  binary
+*.xlsx binary
+*.xls  binary
+*.pkl  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.ico  binary
+*.db   binary
