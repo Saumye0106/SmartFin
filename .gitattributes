@@ -9,3 +9,8 @@
 *.webp binary
 *.ico  binary
 *.db   binary
+
+# Files that run on Linux must keep LF line endings even when checked out on Windows
+*.sh text eol=lf
+frontend/nginx.conf.template text eol=lf
+frontend/proxy_params_smartfin text eol=lf
