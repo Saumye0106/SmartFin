@@ -31,7 +31,7 @@ ENV SMARTFIN_LOG_FILE=
 RUN python -m pytest -q \
     unit_test/test_statement_import.py unit_test/test_credit_report.py unit_test/test_risk_scorer.py \
     unit_test/test_budget_data_management.py unit_test/test_loan_schema.py unit_test/test_deployment.py \
-    unit_test/test_postgres.py
+    unit_test/test_postgres.py unit_test/test_file_storage.py
 
 
 # ── Runtime ──────────────────────────────────────────────────────────────────

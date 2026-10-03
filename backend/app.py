@@ -118,7 +118,9 @@ app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
 
 # File upload configuration
 app.config['UPLOAD_FOLDER'] = UPLOAD_DIR
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB max file size
+# Largest request body accepted. Statement and credit report uploads allow 15 MB (checked in their routes);
+# at the old value of 5 MB Flask rejected them first. Profile pictures enforce their own 5 MB cap.
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 app.config['ALLOWED_EXTENSIONS'] = {'jpg', 'jpeg', 'png', 'webp'}
 
 jwt = JWTManager(app)

@@ -6,9 +6,10 @@ User profile CRUD, profile picture upload/delete, and financial goals CRUD.
 import os
 import uuid
 
-from flask import Blueprint, request, jsonify, current_app, send_from_directory
+from flask import Blueprint, request, jsonify, current_app, abort
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
+import file_storage
 from db_core import DB_PATH
 from profile_service import ProfileService
 from goals_service import GoalsService
@@ -24,6 +25,9 @@ profile_bp = Blueprint('profile', __name__)
 
 profile_service = ProfileService(DB_PATH)
 goals_service = GoalsService(DB_PATH)
+
+
+MAX_PICTURE_BYTES = 5 * 1024 * 1024
 
 
 def allowed_file(filename):
@@ -150,24 +154,26 @@ def upload_profile_picture():
         if not allowed_file(file.filename):
             return jsonify({'error': 'Invalid file format. Allowed: JPEG, PNG, WebP'}), 400
 
+        # Pictures are capped at 5 MB (the app-wide request limit is higher, for statement uploads)
+        file.stream.seek(0, os.SEEK_END)
+        if file.stream.tell() > MAX_PICTURE_BYTES:
+            return jsonify({'error': 'Picture is larger than 5 MB'}), 413
+        file.stream.seek(0)
+
         # Generate unique filename
         file_extension = file.filename.rsplit('.', 1)[1].lower()
         filename = f"user_{user_id}_{uuid.uuid4().hex}.{file_extension}"
-        filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-
-        # Ensure upload directory exists
-        os.makedirs(current_app.config['UPLOAD_FOLDER'], exist_ok=True)
+        storage = file_storage.get_storage()   # a folder locally, S3 when SMARTFIN_UPLOADS_BUCKET is set
 
         # Delete old profile picture if exists
         profile = profile_service.get_profile(user_id)
         if profile and profile.get('profile_picture_url'):
             old_filename = profile['profile_picture_url'].split('/')[-1]
-            old_filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], old_filename)
-            if os.path.exists(old_filepath):
-                os.remove(old_filepath)
+            if file_storage.is_valid_name(old_filename):
+                storage.delete(old_filename)
 
         # Save file
-        file.save(filepath)
+        storage.save(filename, file.stream)
 
         # Generate URL for the file
         picture_url = f"/uploads/profile_pictures/{filename}"
@@ -200,11 +206,10 @@ def delete_profile_picture():
         if not profile or not profile.get('profile_picture_url'):
             return jsonify({'error': 'No profile picture to delete'}), 404
 
-        # Delete file from filesystem
+        # Delete the stored file
         filename = profile['profile_picture_url'].split('/')[-1]
-        filepath = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        if file_storage.is_valid_name(filename):
+            file_storage.get_storage().delete(filename)
 
         # Update profile to remove picture URL
         profile_service.update_profile(user_id, {'profile_picture_url': None})
@@ -220,7 +225,9 @@ def delete_profile_picture():
 @profile_bp.route('/uploads/profile_pictures/<filename>')
 def serve_profile_picture(filename):
     """Serve profile picture files"""
-    return send_from_directory(current_app.config['UPLOAD_FOLDER'], filename)
+    if not file_storage.is_valid_name(filename):
+        abort(404)
+    return file_storage.get_storage().response(filename)
 
 
 # ==================== GOALS ENDPOINTS ====================

@@ -97,3 +97,9 @@ backend/.hypothesis/
 backend/risk_scorer/data/
 
 wiki
+# Terraform: state holds secrets; tfvars holds your IP and key
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/terraform.tfvars
+infra/terraform/*.tfplan

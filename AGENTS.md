@@ -70,6 +70,7 @@ smartfin-copy/
 │   ├── app.py                          ← Flask app factory — config, CORS, DB init, blueprint registration ONLY (393 lines, zero @app.route left)
 │   ├── db_core.py                      ← Request-scoped connection + helpers (get_db, execute_query, row_to_dict, rows_to_list); DATA_DIR / DB_PATH / UPLOAD_DIR
 │   ├── dbapi.py                        ← **The only place a database is opened.** `connect(path)` → SQLite, or a PostgreSQL connection that behaves like sqlite3 when `DATABASE_URL` is set
+│   ├── file_storage.py                 ← Profile pictures: a folder locally, S3 when `SMARTFIN_UPLOADS_BUCKET` is set; served by the backend either way
 │   ├── auth.db                         ← SQLite database (users, expenses, loans, goals, etc.)
 │   ├── auth/api.py                     ← Blueprint: register/login/refresh/protected, email verification, password reset, Twilio OTP (16 routes)
 │   ├── profile_management/api.py       ← Blueprint: profile CRUD, picture upload/delete, goals CRUD (10 routes). Named _management to avoid shadowing stdlib `profile`
@@ -157,6 +158,8 @@ smartfin-copy/
 │   │   ├── CreditReportImport.jsx      ← Import dialog on the Loans page (portal on <body>): upload → password → preview/edit → import → undo
 │   │   └── ...                         ← All other existing components UNTOUCHED
 │   └── services/api.js                 ← Axios client — has generic api.get() / api.post()
+├── infra/README.md                     ← How to create/destroy the AWS deployment, cost, prerequisites
+├── infra/terraform/                    ← versions, variables, network, compute, iam, storage, database, outputs (+ committed provider lock file)
 ├── docker-compose.yml                  ← backend + frontend containers for local runs (port 8088, named volume for data)
 ├── backend/Dockerfile, .dockerignore   ← python:3.14-slim; stages base → test (pytest in-image) → runtime (non-root, /data volume, waitress)
 ├── frontend/Dockerfile                 ← node build → nginx; nginx.conf.template forwards API paths to ${BACKEND_URL}
@@ -682,6 +685,8 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 28. **Modals must be portalled to `<body>`** (`createPortal`). The page layouts create stacking contexts, so a `fixed z-50` dialog rendered inside a page sits *below* the site footer (`z-20` in a higher context), which then swallows clicks on the dialog's buttons (§15 #72). `StatementImport.jsx` is not portalled and happens to work on the Budget page; portal it if it ever misbehaves.
 29. **Never call `sqlite3.connect` directly in backend code; use `dbapi.connect(path)`.** Otherwise that code silently keeps using a local file when the app runs on PostgreSQL. New SQL must run on both: no `INSERT OR IGNORE/REPLACE`, `PRAGMA`, `sqlite_master`, `date('now')`/`strftime` in SQL, boolean `SUM(...)`, or `ROUND(float, n)`; PostgreSQL also rejects double-quoted string literals and non-aggregated columns missing from `GROUP BY`. Add a call to `unit_test/api_walkthrough.py` for any new endpoint so both databases are compared.
 30. **Unknown URLs used to return 500** (the catch-all error handler swallowed 404/405). Fixed 2026-10-04: HTTP errors keep their status. Also: the Nudge Engine has no `POST /api/nudges/scan`; the scan is `GET /api/nudges/` (§5 and §7 list it wrongly).
+31. **Request size limit.** `MAX_CONTENT_LENGTH` was 5 MB app-wide, so statement and credit report uploads between 5 and 15 MB were rejected by Flask before their own 15 MB check (the user's CIBIL PDF was 4.8 MB). Now 16 MB app-wide; profile pictures enforce 5 MB in their route.
+32. **On Windows an unclosed Flask test-client response keeps a served file locked**, so deleting or replacing that file fails. Close responses in tests that serve files.
 
 ---
 
@@ -863,6 +868,10 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 
 **Decisions (user, 2026-10-04):** Kubernetes on EC2 using **k3s** (not EKS: about $20–40/month instead of $130–160, and Ansible gets a real job); chosen to learn/show the tools, not because the app needs it. ~~SQLite on a persistent volume, one backend replica~~ → **changed the same day: "we will migrate to postgres, so plan accordingly"**. PostgreSQL is now part of the deployment and comes **before** Terraform/Kubernetes, because it changes what gets provisioned. No custom domain yet.
 
+**BLOCKER (2026-10-04): the AWS credentials on this machine are for IAM user `pixelframe-dev`** (another project). It is denied `ec2:DescribeAvailabilityZones`, RDS and SSM calls. Do not try to work around it. The user must create credentials meant for SmartFin and configure them as a separate profile (`aws configure --profile smartfin`); Terraform takes it through `aws_profile`. Until then `terraform plan` cannot run.
+
+**Terraform design choices:** no NAT gateway (the node is in a public subnet; the database's private subnets have no internet route); SSH and the Kubernetes API open only to `admin_cidr`; IMDSv2 with hop limit 2 so pods can use the node's role; RDS password and JWT secret generated by Terraform and stored as SSM SecureString parameters under `/smartfin/` (they are also in the local, git-ignored state file); ECR tags immutable; practice-friendly teardown defaults (`force_destroy`, no final snapshot, no deletion protection). Estimated cost about $40/month (from memory, unverified). Bedrock through the IAM role is untested: the app currently authenticates with `AWS_BEARER_TOKEN_BEDROCK`.
+
 **Tools on the user's machine:** Docker Desktop 29.5 (must be started), `kubectl`, Terraform, AWS CLI with working credentials, WSL Ubuntu (for Ansible; not installed yet). No helm/k3d/kind.
 
 | Phase | What | Status |
@@ -870,8 +879,8 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 | 1 | App configurable from the environment | ✅ 2026-10-04 |
 | 2 | Docker images + compose, tests inside the image | ✅ 2026-10-04 |
 | 3 | **PostgreSQL migration** | ✅ 2026-10-04 (details below) |
-| 4 | Uploads (profile pictures) to S3, so more than one backend replica can run | ⬜ |
-| 5 | Terraform: VPC, EC2, security groups, ECR, **RDS PostgreSQL** (or none if Postgres runs in-cluster), S3 (uploads, backups, Terraform state), IAM role (Bedrock, ECR pull, S3), secrets | ⬜ |
+| 4 | Uploads (profile pictures) to S3, so more than one backend replica can run | ✅ 2026-10-04 in code (`file_storage.py`); tested with a stand-in S3 client, **not yet against a real bucket** |
+| 5 | Terraform (`infra/terraform/`): VPC with public + private subnets, security groups, EC2 node + Elastic IP, IAM role, ECR ×2, S3 uploads bucket, RDS PostgreSQL 17, secrets in SSM Parameter Store | 🟡 written; `fmt` + `validate` pass; **never planned or applied** (no usable credentials, see below) |
 | 6 | Ansible: install/harden k3s on the instance | ⬜ |
 | 7 | Kubernetes manifests: backend Deployment (**2 replicas**, no data volume, probes on `/healthz`), frontend Deployment, Services, Ingress, Secret with `DATABASE_URL` | ⬜ |
 | 8 | GitHub Actions: tests on SQLite **and** PostgreSQL → build → push to ECR → roll out | ⬜ (existing `deploy.yml` publishes the frontend to GitHub Pages) |
@@ -916,6 +925,7 @@ Not done / known limits:
 | `SMARTFIN_DATA_DIR` | Folder for `auth.db` (SQLite only) and `uploads/`. Default: `backend/`. In the image: `/data` (a volume) |
 | `SMARTFIN_ENV` | `production` makes the app refuse to start without a real `JWT_SECRET_KEY` (32+ chars, not the dev default) |
 | `JWT_SECRET_KEY` | Signs login tokens |
+| `SMARTFIN_UPLOADS_BUCKET` | S3 bucket for profile pictures. Unset = the `uploads/` folder under the data folder |
 | `SMARTFIN_CORS_ORIGINS` | Extra allowed origins, comma-separated. Not needed when site and API share an address |
 | `SMARTFIN_LOG_FILE` | Log file path; empty = stdout only (containers). Default `backend.log` |
 | `SMARTFIN_LOG_LEVEL` | Default `INFO` |
@@ -938,6 +948,7 @@ Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BA
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-04 | Claude Code (Opus 5.5) | Deployment phase 4 + Terraform. `backend/file_storage.py`: profile pictures in S3 when `SMARTFIN_UPLOADS_BUCKET` is set (private bucket, still served through the backend; names validated), folder otherwise; request size limit raised to 16 MB with a 5 MB picture cap; 12 tests. `infra/terraform/` written for ap-south-1 (VPC, EC2 + EIP, IAM role, ECR, S3, RDS PostgreSQL 17, SSM secrets) with `infra/README.md`; `terraform fmt`/`validate` pass. **Not planned or applied**: the machine's AWS credentials belong to another project and lack the permissions. PostgreSQL migration committed as `ed8bad0`. §3, §14 #31–#32, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | PostgreSQL migration (deployment phase 3). New `backend/dbapi.py`: one `connect()`; with `DATABASE_URL` set, a psycopg 3 connection that behaves like `sqlite3` (placeholders, rows by name, `lastrowid`, sqlite3 exception classes, per-statement savepoints, DDL translation). All 23 connect sites use it; 8 SQLite-only statements rewritten. `unit_test/api_walkthrough.py` (75 API calls) gives identical transcripts on SQLite and PostgreSQL; `test_postgres.py` enforces that. Compose now runs a PostgreSQL container; stack re-verified. Fixed 404→500 handler. `psycopg[binary]==3.3.6` added. 157 tests (155 + 2 PostgreSQL-only that skip without `TEST_DATABASE_URL`; 10/10 with it). Earlier: phases 1–2 committed as `ab8ebae`; decisions RDS + ap-south-1. Not committed. §1, §3, §14 #29–#30, §15 #79–#82, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | Plan change, no code: the user decided to migrate to PostgreSQL. §17 re-ordered (migration and S3 uploads now come before Terraform/Ansible/Kubernetes) and the migration's scope measured (21 files, 23 connect sites, 244 statements, ~26 tables, 53 test files). Deployment phases 1–2 are still uncommitted |
 | 2026-10-04 | Claude Code (Opus 5.5) | Deployment phases 1–2 (§17). App made configurable (`SMARTFIN_DATA_DIR`, `SMARTFIN_ENV` + JWT secret check, `SMARTFIN_CORS_ORIGINS`, `SMARTFIN_LOG_FILE`, `/healthz`), hardcoded DB paths and frontend hosts removed, `backend/requirements.txt` pinned to what runs. Added `backend/Dockerfile` (test + runtime stages, non-root), `frontend/Dockerfile` + `nginx.conf.template` (serves the app, forwards API routes), `docker-compose.yml`, `.dockerignore` files, `unit_test/test_deployment.py`. 147 tests pass in the image; stack verified end to end on port 8088. Nothing created on AWS. Also committed the credit report import (`67c7e47`). §2, §3, §12, §15 #74–#78, §17 |
