@@ -43,6 +43,20 @@ data "aws_iam_policy_document" "node" {
     resources = ["${aws_s3_bucket.uploads.arn}/profile_pictures/*"]
   }
 
+  # Without this, asking S3 for a picture that doesn't exist answers "access denied" instead of
+  # "not found", and the app can't tell a missing picture from a real permission problem.
+  statement {
+    sid       = "ListProfilePictures"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.uploads.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["profile_pictures/*"]
+    }
+  }
+
   statement {
     sid       = "ReadAppSecrets"
     actions   = ["ssm:GetParameter", "ssm:GetParameters"]

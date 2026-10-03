@@ -107,3 +107,4 @@ infra/terraform/*.tfplan
 # Ansible: generated from Terraform outputs
 infra/ansible/inventory.ini
 infra/ansible/vars.yml
+smartfin-deploy_accessKeys.csv

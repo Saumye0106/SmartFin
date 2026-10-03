@@ -78,7 +78,16 @@ mkdir -p ~/.ssh && cp /mnt/c/Users/<you>/.ssh/smartfin ~/.ssh/smartfin && chmod 
 # 3. In WSL: set up the server and deploy
 cd /mnt/c/Users/<you>/smartfin-copy/smartfin-copy/infra/ansible
 TERRAFORM=terraform.exe ./from_terraform.sh ~/.ssh/smartfin
-ansible-playbook -i inventory.ini site.yml -e image_tag=<the TAG from step 1>
+~/.venvs/smartfin-ansible/bin/ansible-playbook -i inventory.ini site.yml -e image_tag=<the TAG from step 1>
+```
+
+Ansible has to be recent enough for the Python it runs on (ansible-core 2.15 fails on Python 3.14 with
+"module 'ast' has no attribute 'Str'"). A separate environment avoids touching the system packages:
+
+```
+python3 -m venv --without-pip ~/.venvs/smartfin-ansible
+curl -sS https://bootstrap.pypa.io/get-pip.py | ~/.venvs/smartfin-ansible/bin/python3
+~/.venvs/smartfin-ansible/bin/pip install ansible-core
 ```
 
 The playbook installs k3s, copies the app's secrets from Parameter Store into the cluster, sets up the ECR
@@ -88,9 +97,9 @@ Run it again with a new `image_tag` to deploy a new version; the rollout replace
 To try the same manifests on your own machine first, without AWS:
 `kubectl apply -k infra/k8s/overlays/local` on any local cluster that has the two images loaded.
 
-What has and hasn't been run: the Docker images, the PostgreSQL support and the Kubernetes manifests were
-tested locally on a real k3s cluster. Terraform passes `validate` and the playbook passes Ansible's syntax
-check, but neither has been run against AWS yet. Expect to fix small things on the first real run.
+This has been run for real: first deployed on 2026-10-04 (41 resources, then the playbook) and checked from
+outside: the site, sign-up and login, the risk score, profile pictures through S3, and that the database and
+the backend port are not reachable from the internet.
 
 ## Destroy
 
