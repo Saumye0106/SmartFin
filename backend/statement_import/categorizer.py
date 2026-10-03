@@ -28,7 +28,7 @@ _DEBIT_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("investment", ("sip", "mutual fund", "mf", "bse star", "nse mfss", "cams", "kfintech", "kfin", "zerodha",
                     "coin by zerodha", "groww", "kuvera", "upstox", "paytm money", "indmoney", "et money", "smallcase",
                     "nps", "ppf", "rd installment", "recurring deposit")),
-    ("emi", ("emi", "loan", "bajaj fin", "home credit", "nach", "ach d", "ecs/", "hdfc ltd", "lic housing", "tata capital", "fullerton")),
+    ("emi", ("emi", "loan", "bajaj fin", "bajajfin", "home credit", "nach", "ach d", "ecs/", "hdfc ltd", "lic housing", "tata capital", "fullerton")),
     ("insurance", ("insurance", "policybazaar", "lic of india", "lic premium", "hdfc ergo", "icici lombard", "star health", "acko", "digit insurance", "max life", "sbi life")),
     ("rent", ("rent", "nobroker", "nestaway", "housing.com", "landlord")),
     ("food", ("swiggy", "zomato", "dominos", "domino's", "mcdonald", "kfc", "starbucks", "pizza hut", "burger king",
@@ -40,8 +40,8 @@ _DEBIT_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("shopping", ("amazon", "amzn", "flipkart", "myntra", "ajio", "meesho", "nykaa", "croma", "reliance digital",
                   "decathlon", "tata cliq", "lenskart", "snapdeal", "firstcry", "ikea", "pantaloons", "westside",
                   "lifestyle", "shoppers stop", "h&m", "zara", "uniqlo")),
-    ("utilities", ("airtel", "jio", "vodafone", "vi prepaid", "bsnl", "electricity", "bescom", "msedcl", "mseb",
-                   "tata power", "adani electricity", "torrent power", "tneb", "bses", "indane", "hp gas", "bharat gas",
+    ("utilities", ("airtel", "jio", "jioinapp", "vodafone", "vi prepaid", "bsnl", "electricity", "bescom", "msedcl", "mseb",
+                   "tata power", "adani electricity", "torrent power", "tneb", "bses", "hescom", "indane", "hp gas", "bharat gas",
                    "broadband", "act fibernet", "hathway", "recharge", "water bill", "dth", "tata play", "dish tv",
                    "netflix", "spotify", "hotstar", "prime video", "youtube premium", "google play", "apple.com")),
     ("healthcare", ("apollo", "pharmeasy", "1mg", "netmeds", "medplus", "hospital", "clinic", "pharmacy",
@@ -51,7 +51,7 @@ _DEBIT_RULES: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 _CREDIT_RULES: list[tuple[str, tuple[str, ...]]] = [
-    ("income", ("salary", "sal ", "sal/", "payroll", "stipend", "interest", "int.pd", "int pd", "cashback",
+    ("income", ("salary", "sal ", "sal/", "payroll", "stipend", "interest", "int.pd", "int pd", "sbint", "cashback",
                 "refund", "reversal", "dividend")),
 ]
 
@@ -66,9 +66,16 @@ _STOP = {
 }
 
 
+# Single-word keywords this long may also match as the start of a longer word, because
+# statements run names together or cut them short ("AMAZONPAY", "DOMINOSP", "HESCOMBI").
+_PREFIX_MATCH_MIN_LEN = 6
+
+
 def _has_word(text: str, keyword: str) -> bool:
     """Whole-word match, so 'emi' doesn't hit 'premium' and 'rent' doesn't hit 'current'."""
-    return re.search(rf"(?<![a-z0-9]){re.escape(keyword.strip())}(?![a-z0-9])", text) is not None
+    k = keyword.strip()
+    tail = "" if len(k) >= _PREFIX_MATCH_MIN_LEN and k.isalnum() else "(?![a-z0-9])"
+    return re.search(rf"(?<![a-z0-9]){re.escape(k)}{tail}", text) is not None
 
 
 def extract_merchant(description: str) -> str:

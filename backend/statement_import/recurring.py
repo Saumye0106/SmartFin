@@ -10,6 +10,15 @@ A merchant stream counts as recurring when:
 
 Gap-based rather than calendar-based, so a 28-day prepaid recharge or a
 salary that lands on the 30th one month still qualifies.
+
+Two fallbacks, both needed on real statements:
+  - When a merchant bucket as a whole isn't recurring, it is split into
+    clusters of similar amounts and each cluster is tested on its own. Salary
+    often arrives as a bare "NEFT" with no payer name, sharing a bucket with
+    unrelated NEFT credits.
+  - A monthly stream whose pay day moves around (salary on the 3rd, then the
+    21st) fails the gap test, so it also qualifies if it shows up in at least
+    75% of the calendar months it spans, about once a month.
 """
 
 from __future__ import annotations
@@ -23,6 +32,12 @@ MIN_OCCURRENCES = 3
 MAX_AMOUNT_CV = 0.35
 FIXED_AMOUNT_CV = 0.05
 MIN_SHARE_IN_BAND = 0.75
+MIN_MONTH_COVERAGE = 0.75
+# Amounts within 15% of their neighbour (sorted) belong to the same cluster.
+CLUSTER_RATIO = 1.15
+# A cluster was picked by amount, so "similar amounts" proves less than it does for a whole
+# merchant; without a tighter limit, random slices of irregular spending (cab rides) pass.
+CLUSTER_MAX_AMOUNT_CV = 0.15
 DAYS_PER_MONTH = 30.44
 
 # name, (min_gap, max_gap) in days
@@ -58,6 +73,76 @@ def _kind(direction: str, category: str) -> str:
     return {"rent": "rent", "emi": "emi", "investment": "investment", "insurance": "insurance"}.get(category, "bill")
 
 
+def _covers_most_months(items: list[dict]) -> bool:
+    """Roughly one payment per calendar month across the stream's span, whatever the day."""
+    months = {(t["_d"].year, t["_d"].month) for t in items}
+    first, last = items[0]["_d"], items[-1]["_d"]
+    span = (last.year - first.year) * 12 + last.month - first.month + 1
+    return len(months) / span >= MIN_MONTH_COVERAGE and len(items) / span <= 1.25
+
+
+def _amount_clusters(items: list[dict]) -> list[list[dict]]:
+    ordered = sorted(items, key=lambda t: float(t["amount"]))
+    clusters = [[ordered[0]]]
+    for t in ordered[1:]:
+        if float(t["amount"]) <= float(clusters[-1][-1]["amount"]) * CLUSTER_RATIO:
+            clusters[-1].append(t)
+        else:
+            clusters.append([t])
+    return clusters
+
+
+def _stream(items: list[dict], merchant_key: str, direction: str, as_of: date,
+            max_cv: float = MAX_AMOUNT_CV) -> dict | None:
+    """One recurring-stream entry for these transactions, or None if they aren't recurring."""
+    if len(items) < MIN_OCCURRENCES:
+        return None
+    items = sorted(items, key=lambda t: t["_d"])
+    gaps = [(b["_d"] - a["_d"]).days for a, b in zip(items, items[1:])]
+    gaps = [g for g in gaps if g > 0] or [0]
+    median_gap = statistics.median(gaps)
+    cadence = next(((name, band) for name, band in CADENCES if band[0] <= median_gap <= band[1]), None)
+    if cadence is None:
+        return None
+    name, (lo, hi) = cadence
+    if sum(lo <= g <= hi for g in gaps) / len(gaps) < MIN_SHARE_IN_BAND \
+            and not (name == "monthly" and _covers_most_months(items)):
+        return None
+
+    amounts = [float(t["amount"]) for t in items]
+    mean_amt = statistics.mean(amounts)
+    cv = statistics.pstdev(amounts) / mean_amt if mean_amt else 1.0
+    if cv > max_cv:
+        return None
+
+    typical = round(statistics.median(amounts), 2)
+    last = items[-1]["_d"]
+    category = Counter(t["category"] for t in items).most_common(1)[0][0]
+    return {
+        "merchant": items[-1].get("merchant") or merchant_key.title(),
+        "direction": direction,
+        "kind": _kind(direction, category),
+        "category": category,
+        "cadence": name,
+        "interval_days": round(median_gap),
+        "amount_type": "fixed" if cv <= FIXED_AMOUNT_CV else "variable",
+        "typical_amount": typical,
+        "amount_min": min(amounts),
+        "amount_max": max(amounts),
+        "monthly_equivalent": round(typical * (
+            1 if _calendar_monthly(name, median_gap)
+            else _PER_MONTH.get(name, DAYS_PER_MONTH / median_gap)), 2),
+        "occurrences": len(items),
+        "first_date": items[0]["_d"].isoformat(),
+        "last_date": last.isoformat(),
+        "next_expected": (_add_month(last) if _calendar_monthly(name, median_gap)
+                          else last + timedelta(days=round(median_gap))).isoformat(),
+        # Stopped streams (e.g. a cancelled subscription) are reported but flagged inactive.
+        "active": (as_of - last).days <= hi * 1.5,
+        "txn_ids": [t["id"] for t in items if t.get("id")],
+    }
+
+
 def detect_recurring(txns: list[dict], as_of: date | None = None) -> list[dict]:
     """
     txns: dicts with txn_date (date or 'YYYY-MM-DD'), merchant, direction, amount, category, id (optional).
@@ -76,47 +161,14 @@ def detect_recurring(txns: list[dict], as_of: date | None = None) -> list[dict]:
     for (merchant_key, direction), items in groups.items():
         if not merchant_key or len(items) < MIN_OCCURRENCES:
             continue
-        items.sort(key=lambda t: t["_d"])
-        gaps = [(b["_d"] - a["_d"]).days for a, b in zip(items, items[1:])]
-        gaps = [g for g in gaps if g > 0] or [0]
-        median_gap = statistics.median(gaps)
-        cadence = next(((name, band) for name, band in CADENCES if band[0] <= median_gap <= band[1]), None)
-        if cadence is None:
+        whole = _stream(items, merchant_key, direction, as_of)
+        if whole:
+            out.append(whole)
             continue
-        name, (lo, hi) = cadence
-        if sum(lo <= g <= hi for g in gaps) / len(gaps) < MIN_SHARE_IN_BAND:
-            continue
-
-        amounts = [float(t["amount"]) for t in items]
-        mean_amt = statistics.mean(amounts)
-        cv = statistics.pstdev(amounts) / mean_amt if mean_amt else 1.0
-        if cv > MAX_AMOUNT_CV:
-            continue
-
-        typical = round(statistics.median(amounts), 2)
-        last = items[-1]["_d"]
-        category = Counter(t["category"] for t in items).most_common(1)[0][0]
-        out.append({
-            "merchant": items[-1].get("merchant") or merchant_key.title(),
-            "direction": direction,
-            "kind": _kind(direction, category),
-            "category": category,
-            "cadence": name,
-            "interval_days": round(median_gap),
-            "amount_type": "fixed" if cv <= FIXED_AMOUNT_CV else "variable",
-            "typical_amount": typical,
-            "monthly_equivalent": round(typical * (
-                1 if _calendar_monthly(name, median_gap)
-                else _PER_MONTH.get(name, DAYS_PER_MONTH / median_gap)), 2),
-            "occurrences": len(items),
-            "first_date": items[0]["_d"].isoformat(),
-            "last_date": last.isoformat(),
-            "next_expected": (_add_month(last) if _calendar_monthly(name, median_gap)
-                              else last + timedelta(days=round(median_gap))).isoformat(),
-            # Stopped streams (e.g. a cancelled subscription) are reported but flagged inactive.
-            "active": (as_of - last).days <= hi * 1.5,
-            "txn_ids": [t["id"] for t in items if t.get("id")],
-        })
+        for cluster in _amount_clusters(items):
+            found = _stream(cluster, merchant_key, direction, as_of, CLUSTER_MAX_AMOUNT_CV)
+            if found:
+                out.append(found)
 
     out.sort(key=lambda r: -r["monthly_equivalent"])
     return out
@@ -131,8 +183,9 @@ def detect_monthly_income(txns: list[dict], recurring: list[dict] | None = None)
     """
     if recurring is None:
         recurring = detect_recurring(txns)
-    stream_merchants = {r["merchant"].lower() for r in recurring
-                        if r["direction"] == "credit" and r["cadence"] == "monthly"}
+    # (merchant, amount range): a stream may be only one amount cluster of its merchant bucket.
+    streams = [(r["merchant"].lower(), r.get("amount_min", 0.0), r.get("amount_max", float("inf")))
+               for r in recurring if r["direction"] == "credit" and r["cadence"] == "monthly"]
 
     income = []
     for t in txns:
@@ -140,7 +193,8 @@ def detect_monthly_income(txns: list[dict], recurring: list[dict] | None = None)
             continue
         desc = (t.get("description") or "").lower()
         merchant = (t.get("merchant") or "").lower()
-        if merchant in stream_merchants or _SALARY.search(desc):
+        in_stream = any(m == merchant and lo <= float(t["amount"]) <= hi for m, lo, hi in streams)
+        if in_stream or _SALARY.search(desc):
             d = t["txn_date"] if isinstance(t["txn_date"], date) else date.fromisoformat(t["txn_date"])
             income.append((merchant, d, float(t["amount"])))
 

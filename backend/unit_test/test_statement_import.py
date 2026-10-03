@@ -324,3 +324,62 @@ def test_recurring_summary_totals(conn):
              if r["direction"] == "debit" and r["kind"] != "investment"}
     assert t["fixed_outflow_monthly"] == round(sum(fixed.values()), 2)
     assert "txn_ids" not in s["recurring"][0]
+
+
+# ── Real-statement fixes: mode + name layout, run-together names, nameless salary ──
+
+MODE_NAME_CSV = b"""date,DrCr,amount,balance,mode,name,Day,Month,Year,Tday
+2022-01-01,Db,10000.0,90000.00,ATM,,01,01,2022,1
+2022-01-02,Db,930.0,89070.00,UPI,AMAZONPAY,02,01,2022,2
+2022-01-05,Cr,52000.0,141070.00,NEFT,,05,01,2022,3
+2022-01-25,Cr,7.09,141077.09,ECS,,25,01,2022,4
+"""
+
+
+def test_parses_layout_with_mode_and_name_instead_of_narration():
+    txns = parse_statement("export.csv", MODE_NAME_CSV)
+    assert [(t.txn_date.isoformat(), t.description, t.direction, t.amount, t.balance) for t in txns] == [
+        ("2022-01-01", "ATM", "debit", 10000.0, 90000.0),
+        ("2022-01-02", "UPI AMAZONPAY", "debit", 930.0, 89070.0),
+        ("2022-01-05", "NEFT", "credit", 52000.0, 141070.0),
+        ("2022-01-25", "ECS", "credit", 7.09, 141077.09),
+    ]
+    assert extract_merchant("UPI AMAZONPAY") == "Amazonpay"
+
+
+@pytest.mark.parametrize("desc,direction,category", [
+    ("UPI AMAZONPAY", "debit", "shopping"),      # names run together
+    ("UPI DOMINOSP", "debit", "food"),           # ... or cut short
+    ("UPI HESCOMBI", "debit", "utilities"),
+    ("UPI JIOINAPP", "debit", "utilities"),
+    ("SBINT", "credit", "income"),
+    ("UPI CHAITANYA", "debit", "other"),         # short keywords ("chai") stay whole-word
+    ("UPI JIONAGAR", "debit", "other"),
+    ("POS PREMIUM STORE", "debit", "other"),
+])
+def test_long_keywords_match_as_word_prefix(desc, direction, category):
+    assert categorize(desc, direction, extract_merchant(desc))[0] == category
+
+
+def _nameless_salary_rows():
+    """Salary as a bare 'NEFT' on a moving pay day, mixed with unrelated NEFT credits."""
+    pay_days = [(1, 5), (2, 11), (3, 21), (4, 7), (5, 3), (6, 5), (7, 2), (8, 1)]
+    rows = [dict(txn_date=_date(2022, m, d), merchant="Neft", direction="credit", amount=52000.0 + 300 * (m % 3),
+                 category="income", description="NEFT") for m, d in pay_days]
+    rows += [dict(txn_date=_date(2022, m, d), merchant="Neft", direction="credit", amount=a,
+                  category="income", description="NEFT")
+             for m, d, a in [(1, 10, 2400.0), (1, 29, 2400.0), (2, 11, 2400.0), (3, 17, 2400.0), (5, 25, 3933.0)]]
+    return rows
+
+
+def test_nameless_salary_is_found_by_amount_cluster():
+    rows = _nameless_salary_rows()
+    rec = detect_recurring(rows)
+    assert len(rec) == 1
+    assert rec[0]["cadence"] == "monthly" and rec[0]["kind"] == "income" and rec[0]["occurrences"] == 8
+    assert 52000.0 <= rec[0]["typical_amount"] <= 52600.0
+    income = detect_monthly_income(rows, rec)
+    # only the salary cluster counts; the other NEFT credits in the same bucket don't
+    assert sorted(income) == [f"2022-{m:02d}" for m in range(1, 9)]
+    assert all(52000.0 <= v <= 52600.0 for v in income.values())
+

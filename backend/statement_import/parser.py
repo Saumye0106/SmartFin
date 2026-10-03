@@ -4,7 +4,9 @@ Parse bank statements (CSV / XLS / XLSX / PDF) into normalized transactions.
 Indian banks don't share a format, so instead of one hardcoded parser per
 bank this finds the header row by keyword and maps columns by meaning:
   - date        ("Txn Date", "Transaction Date", "Date", "Value Dt", ...)
-  - description ("Narration", "Description", "Particulars", "Remarks", ...)
+  - description ("Narration", "Description", "Particulars", "Remarks", ...), or, when
+    there is no narration column, a payment-mode column plus a counterparty column
+    ("mode" + "name") joined into one description
   - debit/credit as two columns ("Withdrawal Amt.", "Deposit Amt.", "Debit", "Credit")
     or one amount column plus a Dr/Cr indicator
   - balance (optional)
@@ -49,7 +51,11 @@ class ParsedTransaction:
 _DESC_KEYS = ("narration", "description", "particulars", "remarks", "details", "transaction details")
 _DEBIT_KEYS = ("withdrawal", "debit", "paid out", "dr amount", "dr amt")
 _CREDIT_KEYS = ("deposit", "credit", "paid in", "cr amount", "cr amt")
-_DRCR_KEYS = ("dr/cr", "dr / cr", "cr/dr", "dr|cr", "debit/credit", "txn type", "type")
+# Compared with everything but letters removed, so "Dr/Cr", "DrCr" and "Dr | Cr" all match.
+_DRCR_KEYS = ("drcr", "crdr", "debitcredit", "creditdebit", "txntype", "transactiontype", "type")
+# Exports with no narration column: description = "<mode> <counterparty>".
+_MODE_KEYS = ("mode", "channel", "payment mode", "txn mode", "transaction mode", "method")
+_PARTY_KEYS = ("name", "payee", "merchant", "beneficiary", "counterparty", "party", "paid to", "to/from")
 
 
 def _norm(cell) -> str:
@@ -68,8 +74,12 @@ def _find_columns(header: list[str]) -> dict | None:
             date_candidates.append((i, h))
         elif any(k in h for k in _DESC_KEYS) and "desc" not in cols:
             cols["desc"] = i
-        elif h in _DRCR_KEYS and "drcr" not in cols:
+        elif re.sub(r"[^a-z]", "", h) in _DRCR_KEYS and "drcr" not in cols:
             cols["drcr"] = i
+        elif h in _MODE_KEYS and "mode" not in cols:
+            cols["mode"] = i
+        elif h in _PARTY_KEYS and "party" not in cols:
+            cols["party"] = i
         elif (h in ("dr", "withdrawals", "debits") or any(k in h for k in _DEBIT_KEYS)) and "debit" not in cols:
             cols["debit"] = i
         elif (h in ("cr", "deposits", "credits") or any(k in h for k in _CREDIT_KEYS)) and "credit" not in cols:
@@ -79,7 +89,7 @@ def _find_columns(header: list[str]) -> dict | None:
         elif "amount" in h and "amount" not in cols:
             cols["amount"] = i
 
-    if not date_candidates or "desc" not in cols:
+    if not date_candidates or not ("desc" in cols or "mode" in cols or "party" in cols):
         return None
     # Prefer the transaction date over the value date when both exist.
     preferred = [c for c in date_candidates if "value" not in c[1]]
@@ -234,10 +244,11 @@ def parse_statement(filename: str, data: bytes, password: str | None = None) -> 
         if [_norm(c) for c in row] == header_norm:
             continue  # header repeated on each PDF page
         d = parse_date(cell(row, "date"))
-        desc = re.sub(r"\s+", " ", str(cell(row, "desc") or "")).strip()
+        desc_cells = [cell(row, "desc")] if "desc" in cols else [cell(row, "mode"), cell(row, "party")]
+        desc = re.sub(r"\s+", " ", " ".join(str(c or "") for c in desc_cells)).strip()
         if d is None:
             # Multi-line narrations: continuation rows have a description but no date.
-            if desc and txns and all(not str(c).strip() for j, c in enumerate(row) if j != cols["desc"]):
+            if "desc" in cols and desc and txns                     and all(not str(c).strip() for j, c in enumerate(row) if j != cols["desc"]):
                 txns[-1].description = f"{txns[-1].description} {desc}".strip()
             continue
 

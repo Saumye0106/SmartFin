@@ -53,7 +53,7 @@ export default function RecurringPayments({ refreshKey }) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {active.map((r) => (
-            <div key={`${r.merchant}-${r.direction}`} className="rounded-xl border border-white/10 bg-black/30 p-4">
+            <div key={`${r.merchant}-${r.direction}-${r.typical_amount}`} className="rounded-xl border border-white/10 bg-black/30 p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="font-medium">{r.merchant}</div>
                 <span className={`text-[10px] uppercase tracking-wider border rounded px-1.5 py-0.5 ${KIND_STYLE[r.kind] || KIND_STYLE.bill}`}>
