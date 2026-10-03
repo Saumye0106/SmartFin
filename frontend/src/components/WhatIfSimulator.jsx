@@ -2,8 +2,8 @@ import { useState } from 'react';
 
 const WhatIfSimulator = ({ currentData, onSimulate }) => {
   const [modifiedData, setModifiedData] = useState({
-    shopping: currentData?.shopping || 0,
-    savings: currentData?.savings || 0
+    emi: currentData?.emi || 0,
+    rent: currentData?.rent || 0
   });
 
   const [simulationResult, setSimulationResult] = useState(null);
@@ -24,8 +24,8 @@ const WhatIfSimulator = ({ currentData, onSimulate }) => {
     try {
       const result = await onSimulate(currentData, {
         ...currentData,
-        shopping: modifiedData.shopping,
-        savings: modifiedData.savings
+        emi: modifiedData.emi,
+        rent: modifiedData.rent
       });
       setSimulationResult(result);
     } catch (error) {
@@ -45,53 +45,53 @@ const WhatIfSimulator = ({ currentData, onSimulate }) => {
         </div>
         <div>
           <h2 className="text-xl font-bold text-white">What-If Simulator</h2>
-          <p className="text-xs text-white/50">Test different scenarios to optimize your finances</p>
+          <p className="text-xs text-white/50">See how a different EMI or housing cost would change your score</p>
         </div>
       </div>
       
       {/* Controls */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         <div className="space-y-2">
-          <label htmlFor="shopping" className="text-[10px] uppercase tracking-widest text-white/40 font-medium flex items-center gap-2">
-            <iconify-icon icon="solar:bag-smile-linear" width="14" className="text-purple-400"></iconify-icon>
-            Shopping & Entertainment
+          <label htmlFor="emi" className="text-[10px] uppercase tracking-widest text-white/40 font-medium flex items-center gap-2">
+            <iconify-icon icon="solar:card-linear" width="14" className="text-purple-400"></iconify-icon>
+            EMI & Loans
           </label>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 text-sm font-mono">₹</span>
             <input
               type="number"
-              id="shopping"
-              name="shopping"
-              value={modifiedData.shopping}
+              id="emi"
+              name="emi"
+              value={modifiedData.emi}
               onChange={handleChange}
               min="0"
               className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-3 pl-8 text-sm text-white placeholder-white/20 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/50 transition-all duration-200 font-mono"
             />
           </div>
           <div className="text-xs text-white/40 font-mono">
-            Current: ₹{currentData.shopping?.toLocaleString()}
+            Current: ₹{currentData.emi?.toLocaleString()}
           </div>
         </div>
 
         <div className="space-y-2">
-          <label htmlFor="savings" className="text-[10px] uppercase tracking-widest text-white/40 font-medium flex items-center gap-2">
-            <iconify-icon icon="solar:safe-square-linear" width="14" className="text-green-400"></iconify-icon>
-            Monthly Savings
+          <label htmlFor="rent" className="text-[10px] uppercase tracking-widest text-white/40 font-medium flex items-center gap-2">
+            <iconify-icon icon="solar:home-2-linear" width="14" className="text-green-400"></iconify-icon>
+            Rent/Housing
           </label>
           <div className="relative">
             <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 text-sm font-mono">₹</span>
             <input
               type="number"
-              id="savings"
-              name="savings"
-              value={modifiedData.savings}
+              id="rent"
+              name="rent"
+              value={modifiedData.rent}
               onChange={handleChange}
               min="0"
               className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-3 pl-8 text-sm text-white placeholder-white/20 focus:outline-none focus:border-green-500/50 focus:ring-1 focus:ring-green-500/50 transition-all duration-200 font-mono"
             />
           </div>
           <div className="text-xs text-white/40 font-mono">
-            Current: ₹{currentData.savings?.toLocaleString()}
+            Current: ₹{currentData.rent?.toLocaleString()}
           </div>
         </div>
       </div>
@@ -126,12 +126,18 @@ const WhatIfSimulator = ({ currentData, onSimulate }) => {
             <h3 className="text-lg font-semibold text-white">Simulation Results</h3>
           </div>
           
+          {simulationResult.message && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+              {simulationResult.message}
+            </div>
+          )}
+
           {/* Score Comparison */}
           <div className="grid grid-cols-3 gap-4">
             <div className="text-center p-4 rounded-lg bg-white/5 border border-white/10">
               <div className="text-xs text-white/50 mb-2">Current Score</div>
               <div className="text-3xl font-bold text-white font-mono">
-                {simulationResult.current_score?.toFixed(1)}
+                {simulationResult.current_score?.toFixed(1) ?? '–'}
               </div>
             </div>
 
@@ -160,7 +166,7 @@ const WhatIfSimulator = ({ currentData, onSimulate }) => {
                 className="text-3xl font-bold font-mono"
                 style={{ color: simulationResult.modified_classification?.color }}
               >
-                {simulationResult.modified_score?.toFixed(1)}
+                {simulationResult.modified_score?.toFixed(1) ?? '–'}
               </div>
             </div>
           </div>

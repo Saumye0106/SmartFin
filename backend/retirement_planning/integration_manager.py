@@ -35,24 +35,30 @@ class IntegrationManager:
             financial_health_scorer: Financial health scorer service (injected)
         
         Returns:
-            Financial health score (0-100)
+            Financial health score (0-100) from risk_scorer (percentile within the user's age band)
         
         Raises:
             IntegrationError: If retrieval fails
         """
         try:
-            if financial_health_scorer is None:
-                # Import here to avoid circular imports
-                try:
-                    from backend.financial_health_scorer import FinancialHealthScorer
-                except ImportError:
-                    # Handle being run from backend directory
-                    from financial_health_scorer import FinancialHealthScorer
+            if financial_health_scorer is not None:
+                score = financial_health_scorer.calculate_score(user_id)
+            else:
+                # The risk model, fed from the user's own SmartFin records.
                 import os
+                import sqlite3
+                from risk_scorer.service import assess_user
                 db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'auth.db')
-                financial_health_scorer = FinancialHealthScorer(db_path)
-            
-            score = financial_health_scorer.calculate_score(user_id)
+                conn = sqlite3.connect(db_path)
+                conn.row_factory = sqlite3.Row
+                try:
+                    assessment = assess_user(conn, user_id)
+                finally:
+                    conn.close()
+                score = assessment['score']
+                if score is None:
+                    # Callers fall back to a neutral value rather than a score invented from age alone.
+                    raise ValueError('not enough data to score: ' + ', '.join(m['input'] for m in assessment['missing']))
             logger.info(f"Retrieved financial health score for user {user_id}: {score}")
             return score
         except Exception as e:
@@ -309,7 +315,8 @@ class IntegrationManager:
         
         # Try to import each service
         try:
-            from backend.financial_health_scorer import FinancialHealthScorer
+            from risk_scorer.model import get_model
+            get_model()
             health['financial_health_scorer'] = 'ok'
         except:
             health['financial_health_scorer'] = 'error'

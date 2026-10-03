@@ -1,21 +1,20 @@
 """
-Loads the legacy 8-factor GradientBoosting financial health model at import
-time, so all scorer routes/helpers share one in-memory model instance.
+Model handle for the health-score routes.
+
+The score used to come from enhanced_model.pkl, a GradientBoosting model
+trained to copy an 8-factor formula. It now comes from risk_scorer: an
+XGBoost model trained on real borrower outcomes (see risk_scorer/train_model.py).
+The names below are kept because app.py and the routes import them.
 """
 
-import os
+from risk_scorer.model import get_model
+from risk_scorer.service import model_summary
 
-import joblib
+risk_model = get_model()
+model_metadata = risk_model.metadata
+model_data = {'model_type': model_metadata['model_type']}
+feature_names = model_metadata['features']
 
-print("Loading ML model...")
-# Get the absolute path to the data directory for enhanced model
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_DIR = os.path.join(BASE_DIR, 'data')
-
-# Load enhanced model
-model_data = joblib.load(os.path.join(DATA_DIR, 'enhanced_model.pkl'))
-model = model_data['model']
-feature_names = model_data['feature_cols']
-model_metadata = model_data['metrics']
-print(f"Model loaded: {model_data['model_type']}")
-print(f"Model R2 Score: {model_metadata['r2_test']:.4f} (95.85% - Enhanced 8-Factor Model)")
+_summary = model_summary()
+print(f"Risk model loaded: {_summary['model_type']}, trained on {_summary['trained_on']}")
+print(f"Cross-validated AUC {_summary['auc']:.3f} (logistic baseline {_summary['baseline_auc']:.3f})")

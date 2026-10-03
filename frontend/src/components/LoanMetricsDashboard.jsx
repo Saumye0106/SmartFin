@@ -350,7 +350,7 @@ const LoanMetricsDashboard = ({ userId, onFetchMetrics }) => {
           <div className="text-sm text-blue-400/80">
             <p className="font-medium mb-1">About Loan Metrics</p>
             <p className="text-xs text-blue-400/60">
-              These metrics contribute to your overall financial health score. Maintain diverse loans, make on-time payments, and manage loan tenures effectively to improve your score.
+              Late and missed payments feed your financial health score directly. Maintain diverse loans, make on-time payments, and manage loan tenures effectively to improve your score.
             </p>
           </div>
         </div>

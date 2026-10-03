@@ -203,6 +203,8 @@ const MainDashboard = ({
               {/* Score Display - Full Width */}
               <div className="glass-panel glass-panel-hover rounded-xl p-8 border border-white/10">
                 <ScoreDisplay 
+                  risk={result.risk}
+                  modelInfo={result.model_info}
                   score={result.score} 
                   classification={result.classification} 
                 />
@@ -236,6 +238,7 @@ const MainDashboard = ({
               {/* What-If Simulator - Full Width */}
               <div className="glass-panel glass-panel-hover rounded-xl p-8 border border-white/10">
                 <WhatIfSimulator 
+                  key={result.timestamp}
                   currentData={currentData} 
                   onSimulate={onWhatIf}
                 />

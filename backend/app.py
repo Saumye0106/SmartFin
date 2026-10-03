@@ -19,25 +19,34 @@ import sys
 sys.stdout = sys.__stdout__
 sys.stderr = sys.__stderr__
 
+# INFO by default. DEBUG made third-party libraries write request bodies, API keys and the
+# full contents of uploaded bank statements into backend.log, and slowed PDF imports badly.
+# Set SMARTFIN_LOG_LEVEL=DEBUG to get SmartFin's own debug lines back.
+LOG_LEVEL = getattr(logging, os.environ.get('SMARTFIN_LOG_LEVEL', 'INFO').upper(), logging.INFO)
+# These log user data or secrets at DEBUG, so they stay at WARNING whatever LOG_LEVEL is.
+NOISY_LOGGERS = ('pdfminer', 'pdfplumber', 'botocore', 'boto3', 'urllib3', 's3transfer', 'PIL', 'matplotlib')
+
 # Create custom formatter
 log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
 # Console handler with immediate flushing
 console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.DEBUG)
+console_handler.setLevel(LOG_LEVEL)
 console_handler.setFormatter(logging.Formatter(log_format))
 
 # File handler with immediate flushing
 file_handler = logging.FileHandler('backend.log', mode='a')
-file_handler.setLevel(logging.DEBUG)
+file_handler.setLevel(LOG_LEVEL)
 file_handler.setFormatter(logging.Formatter(log_format))
 
 # Configure root logger
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=LOG_LEVEL,
     handlers=[console_handler, file_handler],
     force=True
 )
+for _name in NOISY_LOGGERS:
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +93,7 @@ from calculators.api import calculators_bp
 from legacy_scorer.api import legacy_scorer_bp
 from statement_import.api import statement_import_bp
 from statement_import.migrations import create_tables as create_statement_import_tables
+from risk_scorer.migrations import create_tables as create_risk_scorer_tables
 from legacy_scorer.model import model_data, model_metadata
 
 from db_core import DB_PATH, get_db, close_connection, execute_query, row_to_dict, rows_to_list
@@ -342,6 +352,7 @@ def init_db():
     # Initialize retirement planning tables
     RetirementPlanningMigrations.create_tables(DB_PATH)
     create_statement_import_tables(DB_PATH)
+    create_risk_scorer_tables(DB_PATH)
 
 # Initialize database
 init_db()
@@ -363,7 +374,7 @@ if __name__ == '__main__':
     print("SmartFin Backend Server Starting...")
     print("="*60)
     print(f"Model: {model_data['model_type']}")
-    print(f"Accuracy: {model_metadata['r2_test']:.2%}")
+    print(f"Cross-validated AUC: {model_metadata['metrics']['xgb']['auc']:.3f}")
     print("="*60 + "\n")
 
     # Configure all loggers to output to console
@@ -371,21 +382,21 @@ if __name__ == '__main__':
     
     # Set root logger
     root_logger = werkzeug_logging.getLogger()
-    root_logger.setLevel(werkzeug_logging.DEBUG)
+    root_logger.setLevel(LOG_LEVEL)
     
     # Set Flask logger
     flask_logger = werkzeug_logging.getLogger('flask')
-    flask_logger.setLevel(werkzeug_logging.DEBUG)
+    flask_logger.setLevel(LOG_LEVEL)
     
     # Set Werkzeug logger
     werkzeug_log = werkzeug_logging.getLogger('werkzeug')
-    werkzeug_log.setLevel(werkzeug_logging.DEBUG)
+    werkzeug_log.setLevel(LOG_LEVEL)
     
     # Set our app logger
     app_logger = werkzeug_logging.getLogger(__name__)
-    app_logger.setLevel(werkzeug_logging.DEBUG)
+    app_logger.setLevel(LOG_LEVEL)
     
-    logger.info("Starting Flask app with debug logging enabled")
+    logger.info("Starting Flask app (log level %s)", logging.getLevelName(LOG_LEVEL))
     
     # Use Waitress WSGI server (more reliable than Flask dev server for HTTP)
     try:

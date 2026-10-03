@@ -1,59 +1,68 @@
 """
-Legacy 8-factor financial health scorer.
-Rule-based labels + a GradientBoosting model trained to replicate them
-(see AGENTS.md section 5 for the full honest description). Kept live
-alongside the newer ML modules for backward compatibility.
+Financial health score and the rule-based advice around it.
+
+The score itself comes from risk_scorer (XGBoost trained on real borrower
+outcomes): 0-100 = share of same-age reference borrowers who are riskier than
+the user. The spending patterns, guidance, alerts and investment suggestions
+in this module are still hand-written rules, not ML.
 """
 
 import logging
 from datetime import datetime
 
-import pandas as pd
-
 from guidance_engine import PersonalizedGuidanceEngine
-from legacy_scorer.model import model, feature_names, model_data, model_metadata
+from risk_scorer.service import assess_request, model_summary
 
 logger = logging.getLogger(__name__)
 
 
 def classify_score(score):
     """
-    Classify financial health score into 5 categories
+    Classify the score into 5 categories. The score is a percentile: the share of
+    reference borrowers of the user's age who carry more risk than the user.
+    None means the model had too little to go on (see risk_scorer.service).
     """
+    if score is None:
+        return {
+            'category': 'Not enough data',
+            'color': '#94a3b8',  # slate
+            'emoji': '❔',
+            'description': 'There is not enough information to score you yet. Add the details listed below.'
+        }
     if score >= 80:
         return {
             'category': 'Excellent',
             'color': '#10b981',  # green
             'emoji': '🌟',
-            'description': 'Outstanding financial health! Keep up the great work.'
+            'description': 'Lower risk of falling behind on payments than at least 4 in 5 borrowers your age.'
         }
     elif score >= 65:
         return {
             'category': 'Very Good',
             'color': '#3b82f6',  # blue
             'emoji': '✨',
-            'description': 'Strong financial position with room for minor improvements.'
+            'description': 'Lower risk than about two-thirds of borrowers your age.'
         }
     elif score >= 50:
         return {
             'category': 'Good',
             'color': '#f59e0b',  # amber
             'emoji': '👍',
-            'description': 'Decent financial health, but consider optimizing your spending.'
+            'description': 'Lower risk than the typical borrower your age, with room to improve.'
         }
     elif score >= 35:
         return {
             'category': 'Average',
             'color': '#f97316',  # orange
             'emoji': '⚠️',
-            'description': 'Your finances need attention. Review your expenses carefully.'
+            'description': 'Higher risk than the typical borrower your age. See what is driving it.'
         }
     else:
         return {
             'category': 'Poor',
             'color': '#ef4444',  # red
             'emoji': '🚨',
-            'description': 'Critical financial situation. Immediate action required!'
+            'description': 'Among the riskiest third of borrowers your age. See what is driving it.'
         }
 
 
@@ -356,54 +365,62 @@ def get_investment_advice(score):
         return "Not advisable to invest currently. Focus on reducing debt and increasing savings."
 
 
-def run_prediction_analysis(data):
-    # Calculate expenses from individual categories if provided
-    expenses = data.get('expenses', 0)
-    if expenses == 0 and any(k in data for k in ['rent', 'food', 'travel', 'shopping']):
-        expenses = (data.get('rent', 0) + data.get('food', 0) +
-                   data.get('travel', 0) + data.get('shopping', 0))
+def score_request(data, history=None):
+    """Score only: used by what-if comparisons. Returns (score, assessment)."""
+    assessment = assess_request(data, history)
+    return assessment['score'], assessment
 
-    # Get optional fields with defaults
-    age = data.get('age', 30)
-    has_loan = data.get('has_loan', False)
-    loan_amount = data.get('loan_amount', 0)
-    interest_rate = data.get('interest_rate', 0)
 
-    # Prepare features for enhanced model prediction
-    features = pd.DataFrame([[
-        data['income'],           # income
-        expenses,                 # expenses
-        data['savings'],          # savings
-        data['emi'],              # emi
-        age,                      # age
-        int(has_loan),            # has_loan_numeric
-        loan_amount,              # loan_amount_filled
-        interest_rate             # interest_rate_filled
-    ]], columns=feature_names)
+# The hand-written guidance/investment rules need a number; with no score they get the midpoint.
+NEUTRAL_RULE_SCORE = 50
 
-    # Predict score
-    predicted_score = float(model.predict(features)[0])
-    predicted_score = max(0, min(100, round(predicted_score, 2)))
+
+def compare_scores(current, modified, history=None):
+    """What-if: score two scenarios for the same person."""
+    current_score, current_risk = score_request(current, history)
+    modified_score, modified_risk = score_request(modified, history)
+    result = {
+        'success': True,
+        'current_score': current_score,
+        'modified_score': modified_score,
+        'current_classification': classify_score(current_score),
+        'modified_classification': classify_score(modified_score),
+        'confidence': modified_risk['confidence'],
+        'confidence_note': modified_risk['confidence_note'],
+    }
+    if current_score is None or modified_score is None:
+        missing = (current_risk if current_score is None else modified_risk)['missing']
+        return {**result, 'score_change': None, 'impact': 'neutral', 'missing': missing,
+                'message': 'Not enough data to compare scenarios. ' + ' '.join(m['hint'] for m in missing)}
+    change = round(modified_score - current_score, 2)
+    return {**result, 'score_change': change,
+            'impact': 'positive' if change > 0 else 'negative' if change < 0 else 'neutral'}
+
+
+def run_prediction_analysis(data, history=None):
+    """
+    data: the form/budget fields (income, emi, rent, ...).
+    history: age, late/missed payment counts and saved card details from the user's SmartFin records, if logged in.
+    """
+    predicted_score, assessment = score_request(data, history)
+    rule_score = NEUTRAL_RULE_SCORE if predicted_score is None else predicted_score
 
     # Get classification and enrichments
     classification = classify_score(predicted_score)
     patterns = analyze_spending_patterns(data)
-    guidance = generate_guidance(data, predicted_score, patterns)
+    guidance = generate_guidance(data, rule_score, patterns)
     anomalies = detect_anomalies(data, patterns)
-    investments = suggest_investments(predicted_score, data, patterns)
+    investments = suggest_investments(rule_score, data, patterns)
 
     return {
         'success': True,
         'timestamp': datetime.now().isoformat(),
         'score': predicted_score,
         'classification': classification,
+        'risk': assessment,
         'patterns': patterns,
         'guidance': guidance,
         'anomalies': anomalies,
         'investments': investments,
-        'model_info': {
-            'model_type': model_data['model_type'],
-            'accuracy': f"{model_metadata['r2_test']:.2%}",
-            'average_error': f"±{model_metadata['mae_test']:.1f} points"
-        }
+        'model_info': model_summary()
     }

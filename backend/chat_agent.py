@@ -303,7 +303,6 @@ def execute_tool(tool_name, tool_input, app_context):
     app_context contains: flask app, user_id, request headers, etc.
     """
     from app import app, get_db, row_to_dict, rows_to_list
-    from legacy_scorer.model import model, feature_names
     from legacy_scorer.service import (
         classify_score,
         analyze_spending_patterns,
@@ -311,44 +310,39 @@ def execute_tool(tool_name, tool_input, app_context):
         detect_anomalies,
         suggest_investments,
         run_prediction_analysis as _run_prediction_analysis,
+        score_request as _score_request,
+        compare_scores as _compare_scores,
+        NEUTRAL_RULE_SCORE as _NEUTRAL_RULE_SCORE,
     )
+    from risk_scorer.service import user_history as _user_history
     from budget.service import (
         current_month_string as _current_month_string,
         build_budget_summary as _build_budget_summary,
         build_analysis_payload_from_summary as _build_analysis_payload_from_summary,
     )
-    import pandas as pd
-
     user_id = app_context.get('user_id')
+    # Age and late/missed payment counts from the user's own records feed the risk model.
+    history = None
+    if user_id and tool_name in ('predict_financial_health', 'whatif_simulation', 'analyze_budget_data'):
+        with app.app_context():
+            history = _user_history(get_db(), user_id)
 
     try:
         if tool_name == 'predict_financial_health':
             data = tool_input
-            # Calculate expenses
-            expenses = data.get('expenses', 0)
-            if expenses == 0:
-                expenses = (data.get('rent', 0) + data.get('food', 0) +
-                           data.get('travel', 0) + data.get('shopping', 0))
-
-            # Predict with ML model
-            features = pd.DataFrame([[
-                data['income'], expenses, data['savings'], data['emi'],
-                data.get('age', 30), int(data.get('has_loan', False)),
-                data.get('loan_amount', 0), data.get('interest_rate', 0)
-            ]], columns=feature_names)
-
-            score = float(model.predict(features)[0])
-            score = max(0, min(100, round(score, 2)))
+            score, assessment = _score_request(data, history)
+            rule_score = _NEUTRAL_RULE_SCORE if score is None else score
 
             classification = classify_score(score)
             patterns = analyze_spending_patterns(data)
-            guidance = generate_guidance(data, score, patterns)
+            guidance = generate_guidance(data, rule_score, patterns)
             anomalies = detect_anomalies(data, patterns)
-            investments = suggest_investments(score, data, patterns)
+            investments = suggest_investments(rule_score, data, patterns)
 
             return {
                 'score': score,
                 'classification': classification,
+                'risk': assessment,
                 'patterns': patterns,
                 'guidance': guidance,
                 'anomalies': anomalies,
@@ -359,31 +353,9 @@ def execute_tool(tool_name, tool_input, app_context):
             current = tool_input['current']
             modified = tool_input['modified']
 
-            def calc_score(d):
-                expenses = d.get('expenses', 0)
-                if expenses == 0:
-                    expenses = (d.get('rent', 0) + d.get('food', 0) +
-                               d.get('travel', 0) + d.get('shopping', 0))
-                features = pd.DataFrame([[
-                    d.get('income', 0), expenses, d.get('savings', 0), d.get('emi', 0),
-                    d.get('age', 30), int(d.get('has_loan', False)),
-                    d.get('loan_amount', 0), d.get('interest_rate', 0)
-                ]], columns=feature_names)
-                s = float(model.predict(features)[0])
-                return max(0, min(100, round(s, 2)))
-
-            current_score = calc_score(current)
-            modified_score = calc_score(modified)
-            change = round(modified_score - current_score, 2)
-
-            return {
-                'current_score': current_score,
-                'modified_score': modified_score,
-                'score_change': change,
-                'impact': 'positive' if change > 0 else 'negative' if change < 0 else 'neutral',
-                'current_classification': classify_score(current_score),
-                'modified_classification': classify_score(modified_score)
-            }
+            result = _compare_scores(current, modified, history)
+            result.pop('success', None)
+            return result
 
         elif tool_name == 'calculate_retirement_plan':
             from retirement_planning.calculation_engine import RetirementCalculationEngine
@@ -481,7 +453,7 @@ def execute_tool(tool_name, tool_input, app_context):
                 analysis_input.setdefault('income', 0)
                 analysis_input.setdefault('emi', 0)
                 analysis_input.setdefault('savings', 0)
-                result = _run_prediction_analysis(analysis_input)
+                result = _run_prediction_analysis(analysis_input, history)
                 result['source'] = 'budget_tracker'
                 result['month'] = summary['month']
                 result['analysis_input'] = analysis_input

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import api from '../services/api';
 
 const FinancialForm = ({ onSubmit, loading }) => {
@@ -9,10 +9,26 @@ const FinancialForm = ({ onSubmit, loading }) => {
     travel: '',
     shopping: '',
     emi: '',
-    savings: ''
+    savings: '',
+    age: '',
+    card_limit: '',
+    card_balance: '',
+    times_late: '',
+    times_seriously_late: ''
   });
   const [loadingBudgetData, setLoadingBudgetData] = useState(false);
   const [budgetLoadMessage, setBudgetLoadMessage] = useState('');
+
+  // Card details typed here once are saved to the account and filled in next time.
+  useEffect(() => {
+    api.getRiskProfile()
+      .then((p) => setFormData((prev) => ({
+        ...prev,
+        card_limit: prev.card_limit || (p.card_limit != null ? String(p.card_limit) : ''),
+        card_balance: prev.card_balance || (p.card_balance != null ? String(p.card_balance) : ''),
+      })))
+      .catch(() => {});
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -35,12 +51,20 @@ const FinancialForm = ({ onSubmit, loading }) => {
       emi: Number(formData.emi),
       savings: Number(formData.savings)
     };
+    // Optional inputs are sent only when filled in; blank means "use my SmartFin records / unknown".
+    optionalFields.forEach(({ name }) => {
+      if (formData[name] !== '') data[name] = Number(formData[name]);
+    });
     
     onSubmit(data);
   };
 
   const loadSampleData = () => {
-    setFormData({
+    setFormData((prev) => ({
+      ...prev,
+      age: '',
+      times_late: '',
+      times_seriously_late: '',
       income: '50000',
       rent: '15000',
       food: '8000',
@@ -48,7 +72,7 @@ const FinancialForm = ({ onSubmit, loading }) => {
       shopping: '5000',
       emi: '10000',
       savings: '9000'
-    });
+    }));
   };
 
   const loadBudgetData = async () => {
@@ -90,6 +114,14 @@ const FinancialForm = ({ onSubmit, loading }) => {
     { name: 'savings', label: 'Monthly Savings', icon: 'solar:safe-square-linear', placeholder: '9000', color: 'emerald' },
   ];
 
+  const optionalFields = [
+    { name: 'age', label: 'Age', placeholder: 'from your profile', money: false },
+    { name: 'card_limit', label: 'Credit card limit (saved)', placeholder: 'no card? leave blank', money: true },
+    { name: 'card_balance', label: 'Credit card balance now', placeholder: '0', money: true },
+    { name: 'times_late', label: 'Late payments, last 2 years', placeholder: 'from your loan records', money: false },
+    { name: 'times_seriously_late', label: 'Missed payments (90+ days)', placeholder: 'from your loan records', money: false },
+  ];
+
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {/* Form Grid */}
@@ -119,6 +151,36 @@ const FinancialForm = ({ onSubmit, loading }) => {
             </div>
           </div>
         ))}
+      </div>
+
+      <div>
+        <div className="text-[10px] uppercase tracking-widest text-white/40 font-medium mb-1">Optional, for a more accurate score</div>
+        <p className="text-xs text-white/40 mb-3">
+          Payment history and credit-card use are what the model relies on most. Left blank, age and payment
+          history come from your SmartFin profile and loan records.
+        </p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {optionalFields.map((field) => (
+            <div key={field.name} className="space-y-2 group">
+              <label htmlFor={field.name} className="text-[10px] uppercase tracking-widest text-white/40 font-medium transition-colors group-focus-within:text-cyan-400">
+                {field.label}
+              </label>
+              <div className="relative">
+                {field.money && <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 text-sm font-mono">₹</span>}
+                <input
+                  type="number"
+                  id={field.name}
+                  name={field.name}
+                  value={formData[field.name]}
+                  onChange={handleChange}
+                  placeholder={field.placeholder}
+                  min="0"
+                  className={`w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-4 py-3 ${field.money ? 'pl-8' : ''} text-sm text-white placeholder-white/20 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50 transition-all duration-200 font-mono`}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Actions */}

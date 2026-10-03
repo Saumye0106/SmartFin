@@ -92,3 +92,6 @@ backend/.hypothesis/
 .pytest_cache/
 .cursor
 
+
+# Risk scorer training data (downloaded by risk_scorer/fetch_data.py)
+backend/risk_scorer/data/

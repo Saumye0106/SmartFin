@@ -1,18 +1,63 @@
 """
-Legacy Scorer Blueprint
-Home health-check, the original 8-factor predict/whatif/model-info endpoints,
-and predict-from-budget (which bridges into the budget tracker's data).
+Health Score Blueprint
+Home health-check, the predict/whatif/model-info endpoints, and
+predict-from-budget (which bridges into the budget tracker's data).
+The score comes from risk_scorer; see legacy_scorer/service.py.
 """
 
-import pandas as pd
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
+
+from db_core import get_db
 
 from budget.service import current_month_string, build_budget_summary, build_analysis_payload_from_summary
-from legacy_scorer.model import model, feature_names, model_data, model_metadata
-from legacy_scorer.service import classify_score, run_prediction_analysis
+from legacy_scorer.model import feature_names, model_data, model_metadata
+from legacy_scorer.service import compare_scores, run_prediction_analysis
+from risk_scorer.service import get_risk_profile, model_summary, save_risk_profile, user_history
 
 legacy_scorer_bp = Blueprint('legacy_scorer', __name__)
+
+
+def _current_user_history():
+    """Age and payment record of the logged-in user; None for anonymous callers (these routes allow both)."""
+    try:
+        verify_jwt_in_request(optional=True)
+        identity = get_jwt_identity()
+        return user_history(get_db(), int(identity)) if identity else None
+    except Exception:
+        return None
+
+
+def _remember_card_details(data):
+    """A logged-in user who types their card limit/balance into the score form shouldn't have to type it again."""
+    if data.get('card_limit') is None:
+        return
+    try:
+        verify_jwt_in_request(optional=True)
+        identity = get_jwt_identity()
+        if identity:
+            save_risk_profile(get_db(), int(identity), data.get('card_limit'), data.get('card_balance'))
+    except Exception:
+        pass  # saving is a convenience; never block the score on it
+
+
+@legacy_scorer_bp.route('/api/risk-profile', methods=['GET'])
+@jwt_required()
+def read_risk_profile():
+    """Saved credit-card limit and balance for the logged-in user."""
+    return jsonify({'success': True, **get_risk_profile(get_db(), int(get_jwt_identity()))})
+
+
+@legacy_scorer_bp.route('/api/risk-profile', methods=['PUT'])
+@jwt_required()
+def write_risk_profile():
+    """Save or clear (null) the logged-in user's credit-card limit and balance."""
+    payload = request.get_json(silent=True) or {}
+    try:
+        saved = save_risk_profile(get_db(), int(get_jwt_identity()), payload.get('card_limit'), payload.get('card_balance'))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify({'success': True, **saved})
 
 
 @legacy_scorer_bp.route('/')
@@ -23,7 +68,7 @@ def home():
         'service': 'SmartFin Financial Health API',
         'version': '1.0',
         'model': model_data['model_type'],
-        'model_accuracy': f"{model_metadata['r2_test']:.2%}"
+        'model_auc': model_metadata['metrics']['xgb']['auc']
     })
 
 
@@ -36,7 +81,6 @@ def predict_score():
     try:
         data = request.get_json()
 
-        # Validate input - new enhanced model requires different fields
         required_fields = ['income', 'emi', 'savings']
         for field in required_fields:
             if field not in data:
@@ -44,7 +88,8 @@ def predict_score():
             if not isinstance(data[field], (int, float)) or data[field] < 0:
                 return jsonify({'error': f'Invalid value for {field}. Must be non-negative number.'}), 400
 
-        return jsonify(run_prediction_analysis(data))
+        _remember_card_details(data)
+        return jsonify(run_prediction_analysis(data, _current_user_history()))
 
     except Exception as e:
         return jsonify({
@@ -72,7 +117,7 @@ def predict_from_budget():
         for key in ['income', 'emi', 'savings']:
             analysis_input.setdefault(key, 0)
 
-        response = run_prediction_analysis(analysis_input)
+        response = run_prediction_analysis(analysis_input, user_history(get_db(), user_id))
         response['source'] = 'budget_tracker'
         response['month'] = summary['month']
         response['analysis_input'] = analysis_input
@@ -99,60 +144,7 @@ def what_if_simulation():
         # Modified scenario
         modified_data = data.get('modified', {})
 
-        # Helper function to calculate expenses
-        def get_expenses(scenario_data):
-            expenses = scenario_data.get('expenses', 0)
-            if expenses == 0 and any(k in scenario_data for k in ['rent', 'food', 'travel', 'shopping']):
-                expenses = (scenario_data.get('rent', 0) + scenario_data.get('food', 0) +
-                           scenario_data.get('travel', 0) + scenario_data.get('shopping', 0))
-            return expenses
-
-        # Predict current score
-        current_expenses = get_expenses(current_data)
-        current_features = pd.DataFrame([[
-            current_data.get('income', 0),
-            current_expenses,
-            current_data.get('savings', 0),
-            current_data.get('emi', 0),
-            current_data.get('age', 30),
-            int(current_data.get('has_loan', False)),
-            current_data.get('loan_amount', 0),
-            current_data.get('interest_rate', 0)
-        ]], columns=feature_names)
-
-        current_score = float(model.predict(current_features)[0])
-        current_score = max(0, min(100, round(current_score, 2)))
-
-        # Predict modified score
-        modified_expenses = get_expenses(modified_data)
-        modified_features = pd.DataFrame([[
-            modified_data.get('income', 0),
-            modified_expenses,
-            modified_data.get('savings', 0),
-            modified_data.get('emi', 0),
-            modified_data.get('age', 30),
-            int(modified_data.get('has_loan', False)),
-            modified_data.get('loan_amount', 0),
-            modified_data.get('interest_rate', 0)
-        ]], columns=feature_names)
-
-        modified_score = float(model.predict(modified_features)[0])
-        modified_score = max(0, min(100, round(modified_score, 2)))
-
-        # Calculate impact
-        score_change = modified_score - current_score
-
-        response = {
-            'success': True,
-            'current_score': current_score,
-            'modified_score': modified_score,
-            'score_change': round(score_change, 2),
-            'impact': 'positive' if score_change > 0 else 'negative' if score_change < 0 else 'neutral',
-            'current_classification': classify_score(current_score),
-            'modified_classification': classify_score(modified_score)
-        }
-
-        return jsonify(response)
+        return jsonify(compare_scores(current_data, modified_data, _current_user_history()))
 
     except Exception as e:
         return jsonify({
@@ -167,9 +159,12 @@ def model_info():
     return jsonify({
         'model_type': model_data['model_type'],
         'features': feature_names,
-        'performance': {
-            'r2_score': model_metadata['r2_test'],
-            'mae': model_metadata['mae_test'],
-            'rmse': model_metadata['rmse_test']
-        }
+        'summary': model_summary(),
+        'data_source': model_metadata['data_source'],
+        'trained_at': model_metadata['trained_at'],
+        'metrics': model_metadata['metrics'],
+        'calibration': model_metadata['calibration'],
+        'feature_importance': model_metadata['feature_importance'],
+        'age_band_stats': model_metadata['age_band_stats'],
+        'caveats': model_metadata['caveats'],
     })
