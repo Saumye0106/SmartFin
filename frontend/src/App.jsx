@@ -112,7 +112,9 @@ function AppContent() {
     navigate('/');
   };
 
-  // Protected Route Component
+  // Route guard. Called as a plain function (not rendered as <ProtectedRoute>): a component defined inside
+  // AppContent is a new component type on every render, which remounted the whole page and wiped its form
+  // state each time loading/result changed.
   const ProtectedRoute = ({ children }) => {
     // Check if user is loaded or if we have a token in localStorage
     const hasToken = api.getStoredToken();
@@ -166,7 +168,7 @@ function AppContent() {
 
           {/* Protected Routes */}
           <Route path="/dashboard" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading dashboard. Please try again.">
                 <MainDashboard
                   user={user}
@@ -179,103 +181,103 @@ function AppContent() {
                   error={error}
                 />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/profile" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading profile. Please try again.">
                 <ProfilePage />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/profile/create" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading profile form. Please try again.">
                 <ProfileEditForm />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/profile/edit" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading profile form. Please try again.">
                 <ProfileEditForm />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/goals" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading goals manager. Please try again.">
                 <GoalsManager />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/risk-assessment" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading risk assessment. Please try again.">
                 <RiskAssessment />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/sip-calculator" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading SIP calculator. Please try again.">
                 <SIPCalculator />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/loans" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading loan management. Please try again.">
                 <LoanManagementPage />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/retirement" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading retirement planner. Please try again.">
                 <RetirementPlanner />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/budget" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading budget manager. Please try again.">
                 <BudgetManager />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/chat" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading AI assistant. Please try again.">
                 <ChatAgent />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/portfolio" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading portfolio optimizer. Please try again.">
                 <PortfolioOptimizer />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           <Route path="/nudges" element={
-            <ProtectedRoute>
+            ProtectedRoute({ children: (
               <ErrorBoundary fallbackMessage="Error loading nudge engine. Please try again.">
                 <NudgeEngine />
               </ErrorBoundary>
-            </ProtectedRoute>
+            ) })
           } />
 
           {/* Catch all - redirect to home */}
