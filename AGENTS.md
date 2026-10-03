@@ -1,5 +1,5 @@
 # SmartFin — Agent Context File
-> **Last Updated:** 2026-10-02
+> **Last Updated:** 2026-10-04
 > **Purpose:** Master context document for any AI agent or IDE working on this project.
 > Always read this file first before making any changes. Always update the relevant sections after completing work — and always update it again at the end of a session or after any significant change, even if the session isn't "done" with its broader task.
 
@@ -14,6 +14,7 @@
 - **Auth:** Flask-JWT-Extended (Bearer tokens)
 - **Port:** Backend → `5000`, Frontend (dev) → `5173`
 - **Target Audience:** Students and early-career professionals in India
+- **ML that is real (as of 2026-10-03):** the health score (XGBoost on real borrower outcomes, beats its baseline), the Nudge Engine's Isolation Forest (unaudited), the portfolio return predictor (trained on real prices, 0% influence).
 - **Elevator Pitch:** SmartFin helps users track money behavior, evaluate financial health, plan goals/retirement, and receive actionable recommendations.
 
 ---
@@ -66,17 +67,25 @@ smartfin-copy/
 │   ├── profile_management/api.py       ← Blueprint: profile CRUD, picture upload/delete, goals CRUD (10 routes). Named _management to avoid shadowing stdlib `profile`
 │   ├── budget/
 │   │   ├── api.py                      ← Blueprint: monthly budget + expenses CRUD, summaries (8 routes)
-│   │   └── service.py                  ← Shared budget helpers (build_budget_summary, etc.) — also used by legacy_scorer and chat_agent
+│   │   ├── service.py                  ← Shared budget helpers (build_budget_summary, etc.) — also used by legacy_scorer and chat_agent
+│   │   └── data_management.py          ← delete_month / delete_all / data_overview for one user's budget history (conn-based, unit-tested)
 │   ├── loans/api.py                    ← Blueprint: loan CRUD, payment recording/history, cached loan metrics (9 routes)
 │   ├── chat/
 │   │   ├── api.py                      ← Blueprint: AI chat agent endpoint + session list/history/rename/delete/clear (6 routes)
 │   │   └── service.py                  ← Session-id scoping, title generation, conversation persistence
 │   ├── calculators/api.py              ← Blueprint: SIP + lumpsum calculators (pure math, no DB/auth)
-│   ├── legacy_scorer/
-│   │   ├── model.py                    ← Loads enhanced_model.pkl at import time (model, feature_names, model_metadata)
-│   │   ├── service.py                  ← classify_score, analyze_spending_patterns, generate_guidance, detect_anomalies, suggest_investments, run_prediction_analysis
+│   ├── legacy_scorer/                  ← Health-score ROUTES + rule-based advice. Name is historical: the score now comes from risk_scorer/
+│   │   ├── model.py                    ← Thin handle on the risk model (model_data, model_metadata, feature_names); no longer loads enhanced_model.pkl
+│   │   ├── service.py                  ← score_request, run_prediction_analysis(data, history), classify_score + rule-based patterns/guidance/alerts/investments
 │   │   └── api.py                      ← Blueprint: /, /api/predict, /api/predict/from-budget, /api/whatif, /api/model-info
-│   ├── financial_health_scorer.py      ← OLD standalone scorer module — KEPT (not removed), rule-based heuristics. Distinct from legacy_scorer/ package above
+│   ├── risk_scorer/                    ← ✅ Financial-distress risk model trained on REAL borrower outcomes (replaced the formula-copying scorer 2026-10-03)
+│   │   ├── fetch_data.py               ← Downloads Give Me Some Credit (150k borrowers) from OpenML id 46929, no login. CSV is git-ignored
+│   │   ├── features.py                 ← The 5 features, monotone constraints, age bands, training-frame cleaning, build_features()
+│   │   ├── train_model.py              ← 5-fold CV vs logistic baseline, calibration check, final fit → models/
+│   │   ├── model.py                    ← RiskModel: probability, 0-100 score (percentile within age band), drivers (TreeSHAP)
+│   │   ├── service.py                  ← assess_request(form, history) with confidence levels, assess_user(conn, user_id) from records, user_history, get/save_risk_profile
+│   │   ├── migrations.py               ← risk_profile table (saved credit-card limit and balance)
+│   │   └── models/                     ← risk_model.json (XGBoost native format, not a pickle) + model_metadata.json
 │   ├── loan_metrics_engine.py          ← Loan EMI/amortization calculations
 │   ├── loan_history_service.py         ← Loan CRUD business logic
 │   ├── loan_data_serializer.py         ← Loan response formatting
@@ -86,13 +95,13 @@ smartfin-copy/
 │   ├── profile_service.py              ← User profile management
 │   ├── risk_assessment_service.py      ← Risk scoring engine
 │   ├── twilio_service.py               ← SMS/OTP integration
-│   ├── validation_schemas.py           ← Marshmallow input validation — has a known bug, see §14 item 8
+│   ├── validation_schemas.py           ← Marshmallow input validation (the old `data_key` bug is fixed, §14 item 8)
 │   ├── db_utils.py                     ← Loan-table-specific DB helpers (separate from db_core.py). Any SQL that interpolates a table name must go through `_safe_table_identifier()` (allowlist: `LOAN_TABLES`)
 │   ├── statement_import/               ← Bank statement import (CSV/XLS/XLSX/PDF) → categorized transactions → budget expenses
-│   │   ├── parser.py                   ← Keyword-based header/column detection (bank-agnostic), day-first dates, PDF passwords
+│   │   ├── parser.py                   ← Keyword-based header/column detection (bank-agnostic), day-first dates, PDF passwords; no narration column → description = mode + name columns
 │   │   ├── categorizer.py              ← Merchant extraction from UPI/NEFT/IMPS/POS narrations + Indian-merchant rulebook + user rules
 │   │   ├── service.py                  ← preview → confirm → undo; dedupe hashes; learned rules; sync_income; recurring_summary
-│   │   ├── recurring.py                ← Recurring-stream detection (gap cadence + amount stability) and salary-income per month
+│   │   ├── recurring.py                ← Recurring-stream detection (gap cadence + amount stability, amount-cluster and calendar-month fallbacks) and salary-income per month
 │   │   ├── api.py                      ← Blueprint at /api/import/
 │   │   └── migrations.py               ← bank_transactions, merchant_category_overrides, expense_entries.source
 │   ├── unit_test/fixtures/statements/  ← SAMPLE statements (HDFC/SBI/Axis/ICICI layouts, protected PDF, 6-month HDFC) + make_fixtures.py
@@ -130,12 +139,9 @@ smartfin-copy/
 │   │   ├── ChatAgent.jsx               ← Chat UI — supports tool widgets (score, loans, goals)
 │   │   ├── StatementImport.jsx         ← Import modal (opened from BudgetManager): upload → password → preview/edit → import → undo
 │   │   ├── RecurringPayments.jsx       ← Budget-page card: detected income / fixed costs / investing per month + each stream
+│   │   ├── BudgetDataManager.jsx       ← Budget-page "Manage data" card: past imports (undo), delete this month, delete all (typed DELETE)
 │   │   └── ...                         ← All other existing components UNTOUCHED
 │   └── services/api.js                 ← Axios client — has generic api.get() / api.post()
-├── data/
-│   ├── combined_dataset.csv            ← 52,424 records for health scorer training
-│   ├── enhanced_model.pkl              ← Re-trained GradientBoosting (sklearn 1.9.1, R²=95.88%)
-│   └── train_enhanced_model.py         ← Script to retrain enhanced_model.pkl
 ├── STANDALONE_APP_IDEAS.md             ← Saved ideas for separate apps (EMI decoder, scam checker, …)
 ├── .gitattributes                      ← Marks pdf/xlsx/xls/pkl/images binary (autocrlf=true would corrupt them)
 ├── AGENTS.md                           ← ← THIS FILE — update after every change
@@ -150,9 +156,10 @@ smartfin-copy/
 
 | Module | Status | Reason |
 |---|---|---|
-| `financial_health_scorer.py` | **KEPT** | Demoted, not deleted — backward compatible |
+| `financial_health_scorer.py`, `data/enhanced_model.pkl`, `data/train_enhanced_model.py`, `data/combined_dataset.csv` | **DELETED 2026-10-04** | Old formula-based scorer; nothing referenced them. Recoverable from git history |
 | `/api/predict` endpoint | **KEPT** | Old health score endpoint still live |
 | `MainDashboard.jsx` ScoreDisplay | **KEPT** | Old dashboard still works as-is |
+| `risk_scorer/` | **NEW 2026-10-03** | Replaced the health score: XGBoost on real borrower outcomes; `/api/predict`, `/api/whatif`, `/api/model-info` kept, same response shape plus `risk` |
 | `portfolio_optimizer/` | **NEW — Added** | Real ML: Markowitz + XGBoost |
 | `nudge_engine/` | **NEW — Added** | Real ML: Isolation Forest |
 | `PortfolioOptimizer.jsx` | **NEW — Added** | Route: `/portfolio` |
@@ -169,10 +176,61 @@ smartfin-copy/
 
 ## 5. ML Module Details
 
-### Legacy Module: Financial Health Scorer (OLD — still live)
+### Financial Health Score — risk model on real outcomes (LIVE since 2026-10-03)
 
-**Files:** `backend/financial_health_scorer.py`, `backend/loan_metrics_engine.py`  
-**Endpoints:** `/api/predict`, `/api/whatif`, `/api/model-info`, `/api/predict/from-budget`
+**Files:** `backend/risk_scorer/` (model), `backend/legacy_scorer/` (routes + rule-based advice)
+**Endpoints (unchanged paths):** `/api/predict`, `/api/predict/from-budget`, `/api/whatif`, `/api/model-info`. Responses keep `score`, `classification`, `patterns`, `guidance`, `anomalies`, `investments` and add `risk` {risk_probability, score, age_band, average_risk, drivers[], features, inputs_missing, history_source} and a new `model_info`.
+
+**What it is:** an XGBoost classifier that predicts the probability of serious payment distress (90+ days past due within 2 years), trained on **Give Me Some Credit**: 149,999 real US borrowers, 10,026 of whom ended up in distress (6.68%). Labels are real outcomes, not a formula.
+
+**Features (5), chosen because SmartFin can supply them and their meaning transfers:**
+| Feature | From SmartFin |
+|---|---|
+| `age` | request, else `users_profile.age`, else 30 (the model was never trained on a missing age) |
+| `debt_ratio` | (EMI + rent) / income |
+| `times_late` | request, else `loan_payments.payment_status = 'late'` in the last 730 days |
+| `times_seriously_late` | request, else `'missed'` in the last 730 days |
+| `utilization` | optional: card balance / card limit; NaN when no card |
+
+Left out on purpose: `MonthlyIncome` (US dollars; income still enters via the ratio), open credit lines and real-estate loans (in US data zero lines = 21% distress because lines include cards; it would tell users with no loans to borrow), dependents (+0.001 AUC).
+
+**Results (5-fold stratified CV, out-of-fold):**
+| Model | AUC | PR-AUC | Brier |
+|---|---|---|---|
+| Always predict the base rate | 0.500 | 0.067 | 0.0624 |
+| Logistic regression (baseline) | 0.836 | 0.360 | 0.0517 |
+| **XGBoost** | **0.858** | **0.391** | **0.0497** |
+| Logistic, no card data | 0.820 | 0.356 | 0.0517 |
+| XGBoost, card data hidden | 0.828 | 0.364 | 0.0509 |
+| Reference: XGBoost on all 10 raw columns | 0.866 | 0.401 | 0.0490 |
+
+- Calibrated without post-processing: predicted vs observed distress per decile agree (e.g. 4.2% vs 4.2%, 11.1% vs 11.5%, 37.1% vs 36.0%).
+- The ML gain is real but depends on card data: +0.022 AUC with utilization, only +0.008 without. Age and debt ratio alone give 0.66, so a user with no payment history and no card gets a weak score. Say this plainly if asked.
+- Feature importance (gain): late payments 40%, missed payments 38%, utilization 13%, age 6%, debt ratio 3%.
+- **One model for both cases:** utilization is hidden for a random half of the training rows, so the same model handles users with and without a card.
+- **Monotone constraints** on debt ratio, late, missed and utilization (cost: 0.002 AUC), so a what-if can never reward paying late or borrowing more.
+- **Score (0-100)** = share of reference borrowers **in the user's own age band** (18-29, 30-39, 40-49, 50-59, 60+) with a higher predicted risk, compared like-for-like (with/without card data). The absolute probability is shown next to it. Classification bands unchanged (80/65/50/35).
+- **Drivers** = XGBoost `pred_contribs` (TreeSHAP), so the explanation is what the model computed. `shap` is not a dependency.
+- **Caveats shown in the UI:** US borrowers from 2011, not Indian users (ranking of risk factors transfers better than absolute probabilities); the label is credit distress, not overall wellbeing.
+- Guidance, alerts, spending patterns and investment suggestions around the score are **still hand-written rules**.
+- **Confidence (2026-10-04):** every assessment carries `confidence` + `missing[]`. `good` = payment history (stated, or ≥1 payment on record) or card data known; `limited` = only the debt ratio known (UI shows an amber low-confidence banner); `insufficient` = none of them → `score` and `risk_probability` are `null`, classification is "Not enough data", and the UI lists what to add. An empty payment record is not treated as a clean one. The rule-based advice gets a neutral 50 in that case (`NEUTRAL_RULE_SCORE`).
+- **Saved card details:** `risk_profile(user_id, card_limit, card_balance)`. Typing a card limit into the score form while logged in saves it; the form pre-fills it next time; `GET/PUT /api/risk-profile` (PUT with `card_limit: null` clears).
+- **`assess_user(conn, user_id)`** scores from records alone: income = latest budget with income, EMI = sum of active loans' `monthly_emi`, rent = detected recurring rent (else latest month's rent expenses), plus history and saved card. The **retirement planner** uses it for the 20% financial-health part of readiness; with insufficient data it raises and the planner falls back to its neutral 50.
+
+**Retrain:**
+```bash
+cd backend
+python -X utf8 risk_scorer/train_model.py                 # downloads the data on first run
+python -X utf8 risk_scorer/train_model.py --refresh-data
+```
+
+---
+
+### Legacy Module: 8-factor scorer (RETIRED from the score endpoints 2026-10-03)
+
+> Historical description only. All of its files were deleted on 2026-10-04 (`financial_health_scorer.py`, `enhanced_model.pkl`, its training script and dataset); the retirement planner now uses `risk_scorer`. `loan_metrics_engine.py` stays: the loans module uses it.
+
+**Files:** `backend/financial_health_scorer.py`, `backend/loan_metrics_engine.py`, `data/enhanced_model.pkl`, `data/train_enhanced_model.py`
 
 **How it works (important for interviews):**
 - An 8-factor rule-based heuristic formula generates synthetic training labels (not real financial data labels)
@@ -205,11 +263,6 @@ Score = (Savings × 0.25) + (Debt × 0.20) + (Expense × 0.18) + (Balance × 0.1
 | 50-64 | Good 👍 |
 | 35-49 | Average ⚠️ |
 | 0-34 | Poor 🚨 |
-
-**Retrain if pkl breaks:**
-```bash
-python data/train_enhanced_model.py  # from workspace root
-```
 
 ---
 
@@ -365,6 +418,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - `POST /api/predict/from-budget` — predict from budget module data
 - `POST /api/whatif` — compare two scenarios, returns score delta
 - `GET /api/model-info` — model metadata
+- `GET /api/risk-profile`, `PUT /api/risk-profile` — saved credit-card limit/balance for the risk model (JWT)
 
 ### Auth & Account
 - `POST /register`, `POST /login`, `GET /protected`, `POST /refresh`
@@ -384,6 +438,9 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - `POST /api/budget/expenses`, `GET /api/budget/expenses`
 - `PUT /api/budget/expenses/<id>`, `DELETE /api/budget/expenses/<id>`
 - `GET /api/budget/summary`, `GET /api/budget/analysis-input`
+- `GET /api/budget/data` — counts of what is stored for the user (expenses, budgets, imported transactions, learned rules, date range)
+- `DELETE /api/budget/month/<YYYY-MM>` — removes that month's expenses, imported transactions, budget and planned categories
+- `DELETE /api/budget/all` — body `{"confirm": "DELETE"}` required (400 otherwise); removes all expenses, budgets, imported transactions and learned category rules for the user. Loans, goals, profile untouched
 
 ### Loans
 - `POST /api/loans`, `GET /api/loans/user/<user_id>`, `GET /api/loans/<loan_id>`
@@ -410,6 +467,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - `POST /statement/confirm` — `{rows}` (all preview rows, edited; `include:false` to skip) → imports, creates budget expenses for debits, learns category corrections
 - `GET /transactions?month=YYYY-MM` — imported transactions
 - `GET /recurring` — detected recurring streams (kind, cadence, typical/monthly amount, next date, active) + monthly totals (income / fixed costs / investing)
+- `GET /batches` — past imports (batch id, imported date, period, counts, totals), so an import can be undone later
 - `DELETE /batch/<batch_id>` — undo one import (removes its transactions and the expenses it created, re-syncs import-set income)
 - `confirm` also returns `income_set` {month: amount} and `income_kept_manual` [months]
 
@@ -489,6 +547,16 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - [x] ~~Fix `portfolio_optimizer/personalizer.py` DB queries~~ — done 2026-10-02, all 4 rules verified firing on real data (§15 #28)
 - [x] ~~Merge `refactor/app-blueprints` and `feature/portfolio-real-data` into `main`~~ — done 2026-10-02 (§15 #26)
 - [x] ~~Fix marshmallow bug in `POST /api/profile/goals`~~ — done 2026-10-02 (§15 #27)
+- [x] ~~Replace the formula-copying health scorer with a model trained on real outcomes~~ — done 2026-10-03 (§5, §15 #55–#60). Follow-ups:
+  - [x] Retirement planner switched to `risk_scorer.assess_user` (2026-10-04).
+  - [x] Old model files and `financial_health_scorer.py` deleted (2026-10-04).
+  - [x] Card limit/balance saved per user in `risk_profile` (2026-10-04).
+  - [x] "Not enough data" / low-confidence states instead of a score from age alone (2026-10-04).
+  - [ ] Guidance/investment rules use score thresholds (35/50/65/80) tuned for the old score; they now receive a percentile. Review them.
+  - [ ] The dashboard form still asks for food/travel/shopping/savings, which only feed the rule-based panels. Split or relabel it.
+  - [ ] No UI to clear saved card details (API only: `PUT /api/risk-profile` with `card_limit: null`).
+  - [ ] The user's real statement leaves most spending in "other" and detects no income/rent/EMI, so the model lacks a debt ratio for them. Payment history for the model would come from a credit report (roadmap Phase 3).
+  - [ ] Look for Indian outcome data (the model is trained on US borrowers).
 - [ ] **ACTIVE ROADMAP — automatic data entry → Financial Digital Twin** (agreed 2026-10-02). Manual entry is why finance apps get abandoned, and the digital twin needs real history:
   1. [x] **Bank statement import** (CSV/XLS/XLSX/PDF incl. password-protected) → preview → categorize → budget expenses. Done 2026-10-02, see §15 #38–#44. ⚠️ Built and tested on SAMPLE statements only; validate with a real, redacted statement from the user before relying on it for a given bank.
   2. [x] **Recurring detection + income** — done 2026-10-02 (§15 #45–#49). Rent/EMI/SIP/bills/salary detected from ≥3 occurrences; monthly income filled from salary credits; new `investment` category; Recurring payments card on the Budget page.
@@ -497,10 +565,9 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
   5. [ ] **Financial Digital Twin** — safe-to-spend, goal-success probability (Monte Carlo on the user's own history), personal inflation, what-if sliders (see Feature ideas backlog #1–#2).
   6. [ ] **Account Aggregator sandbox** (Setu) — consent flow; the production path (real AA access needs a regulated FIU).
   - Rules: parse in memory, never store files or passwords; always preview before saving; no claimed ML accuracy — categorization is rules + learned user corrections; train a classifier only once real corrections exist.
-- [ ] **Deferred by user (2026-10-02
+- [ ] **Deferred by user (2026-10-02, "I'll come back to this"):** the Portfolio Optimizer's XGBoost return predictor has R² −0.47 and 0% influence, so it currently adds nothing. Plan: (1) replace it with a next-month **volatility** predictor (volatility clustering is genuinely predictable; it feeds the covariance, so ML would actually move allocations); (2) add a **walk-forward backtest** (rebuild yearly on past-only data; compare return/vol/max drawdown vs all-Nifty and 60/40), run with and without the vol model.
 - [ ] **NEXT:** audit the Nudge Engine the way the Portfolio Optimizer was audited — does it run on real user data or demo-seeded spikes, does the Isolation Forest result hold up, is anything fabricated or silently broken?
 - [ ] Replace `MainDashboard.jsx` health score widget with Portfolio Summary card (optional)
-- [ ] Full removal of old scorer — `financial_health_scorer.py`, `ScoreDisplay.jsx`, `/api/predict` (optional)
 - [ ] Run `demo_seeder.py` for a real user account to populate Nudge Engine data
 - [ ] End-to-end test: login → /portfolio → set amount + risk → verify donut chart renders
 
@@ -519,8 +586,8 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 
 ## 13. Interview / Presentation Talking Points
 
-### The Honest Story on Enhanced Model (R²=95.88%)
-> "We use a GradientBoosting Regressor trained on 52,424 records from two Kaggle datasets (global personal finance + India personal finance). The target labels are generated by an 8-factor rule-based formula we designed — savings behavior, debt burden, expense control, life stage, and loan metrics. The model learns to replicate that formula accurately. The key advantage: our scoring is fully transparent and explainable to users, while the ML layer enables fast generalization to new users without running the rule engine."
+### Financial Health Score Story
+> "The health score is a gradient-boosted model trained on 150,000 real borrowers, labelled by whether they actually fell 90 days behind on a payment in the following two years. I picked only inputs my app can supply and whose meaning carries over: age, debt-to-income, late and missed payments, and optional credit-card utilization. In 5-fold cross-validation it reaches AUC 0.858 against 0.836 for logistic regression, and its probabilities are calibrated: when it says 4%, about 4% defaulted. Three design choices matter. I dropped the 'number of credit lines' column because in US data having none signals risk, which would tell a student with no loans to borrow. I added monotone constraints so a what-if can never reward paying late. And the 0-100 score ranks you against borrowers your own age, because the training population is much older than my users. The limits are stated in the UI: it's US data from 2011, and without payment history or card data the model is weak (AUC 0.66). The earlier version of this module trained a model to copy a formula I wrote myself and reported R² 96%, which measured nothing. Replacing it is the part of the project I'd point to."
 
 ### Portfolio Optimizer Story
 > "The core is Markowitz mean-variance optimization (SLSQP) over 9 Indian asset classes built from real data: NIFTY 50 / Midcap 50 / Smallcap 250 indices, a Nasdaq-100 ETF, a liquid fund's NAV, Gold ETF, COMEX silver in rupees, and a REIT. That's 7 to 23 years each, with Fixed Deposit as the one labeled assumption. Three estimation choices make it robust. First, sample means from short or lucky periods are shrunk toward a risk-based prior, so Silver's 2020s rally or Nasdaq's AI run don't dominate. Second, covariance comes from weekly returns for ~4× more data, weekly rather than daily because silver trades on US hours. Third, there's a 35% per-asset cap. XGBoost predicts next-month returns per asset, and its influence is weighted by its out-of-sample R². Every model scores below zero, so it currently has zero say. That's the Efficient Market Hypothesis showing up honestly on real prices. Along the way we found data problems you only catch by checking: unadjusted stock splits, a liquid ETF whose price ignores its own yield, and a NAV rescaled 100×."
@@ -533,7 +600,8 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 |---|---|
 | Why Flask not Django? | Flask gives faster API-centric development with lightweight control for custom ML/business logic |
 | Why SQLite? | Zero admin overhead, easy local setup, sufficient for prototyping persistent relational workflows |
-| Why GradientBoosting? | Handles non-linear financial relationships, robust to missing data, excellent feature importance analysis |
+| Why gradient boosting for the health score? | It beat the logistic baseline on held-out data (AUC 0.858 vs 0.836), handles missing inputs natively (no income, no card), supports monotone constraints, and gives exact per-prediction explanations (TreeSHAP) |
+| Isn't US data wrong for Indian users? | Partly, and the UI says so. Ratios and payment behaviour have no currency; dollar income and the count of credit lines don't transfer, so they were excluded. Probabilities are indicative; the ranking of what hurts you is the reliable part |
 | How is security handled? | JWT auth, hashed passwords (werkzeug/bcrypt), protected routes, ownership checks, OTP/email verification |
 | How do you prevent SQL injection? | Every query with user input uses `?` parameter binding, so values never become SQL. The few dynamically built queries only interpolate fixed column literals or `?` placeholder lists. Table names (which can't be bound) go through an allowlist check, `_safe_table_identifier()` in `db_utils.py`. Inputs are also type-cast (`float`/`int`/`strptime`), categories are allowlisted, and every update/delete is scoped with `AND user_id = ?` |
 | How do users get data in without typing everything? | Upload a bank/UPI statement (CSV/Excel/PDF, even password-protected). A bank-agnostic parser finds the transaction table by column meaning, a rulebook of Indian merchants categorizes UPI narrations, the user reviews a preview, and corrections are learned per merchant. Re-uploads are de-duplicated by transaction hash; any import can be undone. Production path: RBI's Account Aggregator framework |
@@ -546,12 +614,12 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 ## 14. Known Issues / Gotchas
 
 1. **`.venv` is broken** — built against Python 3.13 (no longer installed). Never activate it. Use `python` from PATH (`C:\Python314\python.exe`).
-2. **`enhanced_model.pkl` compatibility** — re-serialized 2026-09-21 for sklearn 1.9.1. If a different sklearn version loads the old pkl, it throws `ModuleNotFoundError: No module named _loss`. Fix: run `python data/train_enhanced_model.py` from workspace root.
+2. **~~`enhanced_model.pkl` compatibility~~ — OBSOLETE 2026-10-03.** Nothing loads that pickle any more. The risk model is saved in XGBoost's native JSON format, which doesn't break across library versions. If `risk_scorer/models/` is missing, run `python -X utf8 risk_scorer/train_model.py` from `backend/`.
 3. **Windows encoding** — use `python -X utf8` flag for any scripts with emoji characters.
 4. **Frontend Vite warning** — `default referenced in default didn't resolve at build time` is benign. Build still succeeds (683 modules, 0 errors).
 5. **Two `auth.db` files** — one at workspace root (stale/empty), one at `backend/auth.db`. Flask uses `backend/auth.db`. The root one is the empty one that should be deleted if it reappears.
 6. **app.py monolith — RESOLVED, merged to `main` 2026-10-02.** All routes live in blueprints (auth, profile_management, budget, loans, chat, calculators, legacy_scorer) following the retirement_planning/portfolio_optimizer/nudge_engine pattern; `app.py` is ~390 lines of setup/wiring. When moving code in future: grep for lazy `from app import <name>` (e.g. `chat_agent.py`'s `execute_tool()`) — that exact class of bug broke chat mid-refactor and was caught only by calling `/api/chat` on a live server, not by import checks.
-7. **`retirement_planning/` integration_manager.py** — imports `financial_health_scorer` internally. Do not delete `financial_health_scorer.py` without updating `integration_manager.py` first.
+7. **`retirement_planning/integration_manager.py`** gets the health score from `risk_scorer.service.assess_user` (reads `backend/auth.db` by its own path, not `db_core.DB_PATH`). It raises `IntegrationError` when there isn't enough data; `retirement_planning/api.py` then uses 50.
 8. **~~`validation_schemas.py` marshmallow bug~~ — FIXED 2026-10-02.** Marshmallow 4 passes `data_key=` to `@validates` methods; all validators now take `**kwargs` so they run on 3.x and 4.x. Any new `@validates` method needs `**kwargs` too.
 9. **~~Personalizer DB queries didn't match `auth.db`~~ — FIXED 2026-10-02.** Fetchers now read `monthly_budgets`, `loans` (not deleted, not matured), `financial_goals`, `expense_entries`. Failures still fall back to "no adjustment" but are logged as `personalizer: ... failed` warnings. If personalization ever seems to do nothing again, grep the server log for that prefix first.
 10. **Portfolio Optimizer re-fetch cadence:** the data files are snapshots. Re-run `fetch_real_data.py` + `train_model.py` periodically (needs internet: Yahoo Finance + mfapi.in). REIT is the only short history (2019+); its mean leans on the prior until it accrues more. If Yahoo changes a ticker or mfapi.in is down, `fetch_and_save()` raises and leaves the old CSVs untouched rather than writing partial data.
@@ -559,8 +627,18 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 12. **IDE red squiggles on `flask`/`flask_jwt_extended` imports** — the editor's Python language server doesn't know packages live in `C:\Users\saumy\AppData\Roaming\Python\Python314\site-packages` (see item 1). Fixed via `.vscode/settings.json` → `"python.defaultInterpreterPath": "C:\\Python314\\python.exe"`. If squiggles persist, reload the window or run "Python: Select Interpreter" and pick that path manually. Purely cosmetic — doesn't affect running the app.
 13. **Global checkbox CSS:** `frontend/src/components/ProfileEditForm.css` sets `input[type="checkbox"] { appearance: none }` globally (Vite bundles it app-wide) and only styles the checked state. Any checkbox without explicit size/border classes is **invisible** when unchecked. Give new checkboxes classes like `w-4 h-4 rounded border border-white/30 bg-white/5` (as `StatementImport.jsx` does), or scope that rule to the profile form.
 14. **Binary files and git:** `core.autocrlf=true`. `.gitattributes` marks pdf/xlsx/xls/pkl/images as binary. Add new binary extensions there, or git will CRLF-convert and corrupt them on checkout.
-15. **Statement import is validated on SAMPLE files only** (`unit_test/fixtures/statements/`, generated, labelled as samples). Before trusting a new bank's format, test with a real redacted statement. The parser raises a clear error if it can't find the transaction table rather than guessing.
+15. **Statement import is validated on SAMPLE files plus one real-shaped export** (`unit_test/fixtures/statements/` are generated samples; on 2026-10-03 the user's `bankstatements.csv`, a 509-row pre-processed export with `date,DrCr,amount,balance,mode,name` columns, failed and was fixed — §15 #50–#54). It is still not a raw bank download. Before trusting a new bank's format, test with a real redacted statement. The parser raises a clear error if it can't find the transaction table rather than guessing. The strongest check on a real file: every row's balance must equal the previous balance ± the amount. The user's file is not committed (real names); tests use a small synthetic CSV in the same layout.
 16. **The 422 on `/api/import/statement/preview` is intentional** (password-protected PDF). The browser logs it as a console error; it isn't a JS error.
+17. **Pre-existing: 8 test files in `backend/unit_test/` fail at collection** (e.g. `test_profile_service.py`, `test_retirement_repositories.py`, `test_risk_assessment_service.py`), so a bare `pytest unit_test` aborts. Not investigated yet. Run `pytest unit_test/test_statement_import.py unit_test/test_loan_schema.py` (65 pass).
+18. **Recurring detection can return two streams for one merchant** (amount clusters), so never key on merchant alone (`RecurringPayments.jsx` keys on merchant + direction + typical amount; `detect_monthly_income` matches merchant + amount range).
+19. **Risk-model training data is not in the repo** (`backend/risk_scorer/data/` is git-ignored; 150k rows from OpenML). The trained model and its metadata are committed, so the app runs without it. Training needs internet once.
+20. **Health score inputs:** only EMI, rent, income, age, late/missed payments and card utilization move the score. Food, shopping, travel and savings don't (they still feed the rule-based spending charts and advice). The What-If Simulator therefore changes EMI and rent.
+21. **Logging — FIXED 2026-10-04.** `app.py` used to log everything at DEBUG, so `pdfminer` wrote every token of an uploaded statement (narrations, amounts, balances) and `botocore` wrote the Bedrock `Authorization: Bearer …` header into `backend.log`, and PDF imports crawled. Now: level INFO by default (`SMARTFIN_LOG_LEVEL=DEBUG` to override), and `NOISY_LOGGERS` (pdfminer, pdfplumber, botocore, boto3, urllib3, s3transfer, PIL, matplotlib) are pinned to WARNING regardless. Add any new library that handles user data or credentials to that tuple. **Old `backend/backend.log` files still contain the key and statement contents**: delete them (stop the server first; Windows locks the file) and rotate the key.
+22. **Verifying UI changes while the user's servers are running:** don't kill their port-5000 backend. Start a second copy on 5001 (`waitress.serve(app, port=5001)`) and use Playwright `page.route` to rewrite `:5000` → `:5001`; Vite on 5173 already serves the new frontend code via HMR. The user must restart their own backend to pick up backend changes.
+23. **Never test delete flows against `backend/auth.db`.** Set `db_core.DB_PATH` to a copy *before* `from app import app` (see §15 #63) and run that on port 5001. Check the real row counts before and after.
+24. **Two processes can listen on port 5000 at once on Windows** (both bind `0.0.0.0:5000`), and the older one keeps answering. If a restart seems to have no effect, run `netstat -ano | grep :5000` and look for more than one PID; `curl localhost:5000/` shows which model is answering.
+25. **Never define a component inside another component and render it as JSX.** `ProtectedRoute` lived inside `AppContent`, so every state change made it a new component type and React remounted the whole page, wiping form state (§15 #68). It is now called as a plain function: `element={ProtectedRoute({ children: (...) })}`.
+26. **Playwright checks: assert on something that can only appear if the feature worked.** A `waitForSelector('text=Credit-card utilization')` passed while the card data was never submitted, because that driver row is always rendered. Log the request body or assert the value.
 
 ---
 
@@ -657,12 +735,68 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 | 48 | Salary paid on 30 May made May ₹90,000 and June ₹0 | Income attributed by credit date | A payer's credit in the last 5 days of a month, with none from that payer next month, counts toward next month; `_touched_months` includes following months so June's budget gets it | Same run |
 | 49 | Heredoc patch commands failed with "unexpected EOF" | The shell tool chokes on apostrophes inside heredoc bodies (e.g. "month's"), even with a quoted delimiter | Write patch scripts to the session scratchpad with the Write tool and run them | Tooling; nothing had been modified, which was confirmed with `git diff --stat` |
 
+### Session 2026-10-03 — first real-shaped statement (`bankstatements.csv`, 509 rows, Jan 2022 – Oct 2023)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 50 | User's CSV was rejected: "Couldn't find the transaction table" | Header `DrCr` wasn't in the Dr/Cr spellings (only `dr/cr`, `dr|cr`, …), and the file has no narration column, which the parser required: the description is split across `mode` (UPI/ATM/NEFT) and `name` | Dr/Cr headers compared with non-letters stripped; with no narration column, description = mode + counterparty columns | User report; reproduced on the file. Verified: 509 rows, running balance reconciles on every row |
+| 51 | Known merchants fell into "other" (`DOMINOSP`, `AMAZONPAY`, `HESCOMBI`) | Whole-word keyword matching (added in #41) can't match names that are run together or cut short | Single-word keywords of 6+ characters also match as a word prefix; short ones (`emi`, `rent`, `jio`, `chai`) stay whole-word. Added `hescom`, `jioinapp`, `bajajfin`, `sbint` | Dry run of the file through the categorizer |
+| 52 | Salary not detected, budget income stayed ₹0 | Salary arrives as a bare `NEFT` with no payer name, sharing one merchant bucket with unrelated NEFT credits, so the bucket failed the stable-amount test | When a bucket isn't recurring as a whole, split it into amount clusters (neighbours within 15%) and test each; income counts only credits inside the stream's amount range | Same dry run: `detect_monthly_income` returned `{}` |
+| 53 | Salary cluster still rejected | Real pay days move (3rd, 21st, 7th…): only 68% of gaps were 25–36 days, below the 75% bar | Monthly streams also qualify if they appear in ≥75% of the calendar months they span, about once a month | Computed the gaps by hand |
+| 54 | Irregular Uber rides became a "monthly bill" | #52 + #53 together: slicing random spending by amount manufactures a once-a-month pattern | Amount clusters need a tighter amount spread (CV ≤ 0.15 instead of 0.35) | Existing test `test_detects_exactly_the_recurring_streams` failed |
+
+Result on the file: salary ~₹52k/month, a ₹26,286 monthly debit to `HDFCBANK`, an ₹11,500 monthly credit; income filled for 21 months; re-upload 509/509 duplicates; undo clean. Limit that rules can't fix: ~99% of the money out is person-to-person UPI, cheques and ATM cash with 8-character names, so it stays "other" until the user categorizes it in the preview (corrections are learned per merchant).
+
+### Session 2026-10-03 (cont.) — health score replaced with a real-outcome risk model (`main`, uncommitted)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 55 | User: "sick of this", wants ML that is genuine | The health scorer learned labels produced by our own formula; R² 96% measured only how well it copied us | New `risk_scorer/`: XGBoost on 150k real borrowers with real distress labels, evaluated against a logistic baseline | User request |
+| 56 | "Number of open credit lines" would punish users with no loans | US lines include credit cards; zero lines is a rare, risky group there (21% distress vs 5–6%) | Excluded it and real-estate loans; dollar income excluded too (enters only via the ratio) | Tabulated distress rate per feature value before training |
+| 57 | With the 4 inputs SmartFin had, ML barely beat the baseline (0.828 vs 0.820) | Payment counts carry most of the signal and are nearly linear | Added optional card utilization (0.858 vs 0.836); one model trained with utilization hidden on half the rows so users without a card still work | Feature-set comparison across 7 sets × 3 models |
+| 58 | A 22-year-old with a clean record scored 19/100 | Score was a percentile against the whole reference population, whose median age is 52 and where young borrowers are riskier | Score = percentile within the user's own age band; absolute risk shown separately | Scored a set of realistic profiles before integrating |
+| 59 | A user with no age scored 85 | The training data has no missing ages, so the tree's default branch for a missing age is arbitrary | Age is never passed as missing: request → profile → 30 | Same profile check ("nothing known" came out best) |
+| 60 | What-If Simulator would always show "no change" | Its two inputs were shopping and savings, which the new model doesn't use | Simulator now changes EMI and rent | Read the component after the model's inputs were fixed |
+
+### Session 2026-10-03 (cont.) — stale server, deleting budget history (`main`, uncommitted)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 61 | After restarting the backend the user was still scored by the old 8-factor model | Two Python processes were bound to port 5000: the user's fresh one and a stale one from hours earlier that kept answering | Killed the stale PID; `GET /` then reported the XGBoost model | `curl localhost:5000/` returned "8-factor enhanced"; `netstat` showed two listeners |
+| 62 | A user could not delete budget history: only one expense at a time, and an import could be undone only on the screen shown right after importing | No bulk-delete endpoints; no list of past imports | `budget/data_management.py` + `DELETE /api/budget/month/<m>`, `DELETE /api/budget/all` (typed confirmation), `GET /api/budget/data`, `GET /api/import/batches`; `BudgetDataManager.jsx` card | User asked before importing a real statement |
+| 63 | UI check of destructive actions risked the real database | The verification backend would normally open `backend/auth.db` | Served a copy: set `db_core.DB_PATH` before importing `app`; real DB row counts identical before and after (404 / 27 / 509) | Planned |
+| 64 | Deleting a month but leaving its imported transactions would make a re-import skip them as duplicates | Dedupe is by `bank_transactions.txn_hash` | Month delete removes that month's `bank_transactions` too; test confirms the month re-imports cleanly | Design review; covered by `test_deleted_month_can_be_imported_again` |
+
+Privacy answer given to the user (2026-10-03): statement files and PDF passwords are not stored; transactions are stored unencrypted in `backend/auth.db`; `auth.db`, `.env`, `*.log` are git-ignored; the import makes no network calls; the chat agent and advice panels would send expense data to AWS Bedrock if the key worked; the backend binds `0.0.0.0`. Offered and not yet done: bind to `127.0.0.1`, git-ignore statement files, lower the log level.
+
+### Session 2026-10-04 — debug logging leaked statement contents (`main`, uncommitted)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 65 | Importing a real PDF statement flooded the console and `backend.log` with thousands of `pdfminer ... DEBUG` lines, including the transactions themselves, and was slow | Root logger at DEBUG with a file handler; third-party libraries inherit it | Default INFO via `LOG_LEVEL`; data/secret-handling libraries pinned to WARNING in `NOISY_LOGGERS`. Sample PDF preview: 0 pdfminer lines, 0 `Bearer` occurrences, 0.24 s | User pasted the log output |
+
+### Session 2026-10-04 (cont.) — finishing the risk model (`main`, uncommitted)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 66 | "Run Analyzer from This Month" gave the user "Excellent 88.6" on their real data | That month had no income and nothing categorized as rent/EMI, no loan payments, no card: the model had only age, and an empty payment record was read as a clean one | Button removed (user's request). Model side: `confidence` levels; no score when payment history, card data and debt ratio are all unknown | Ran the endpoint on the user's month and read the features it was given |
+| 67 | Card details had to be retyped for every score | Nowhere to store them | `risk_profile` table + `GET/PUT /api/risk-profile`; the score form saves and pre-fills them | Planned follow-up |
+| 68 | **Dashboard form was wiped after every "Analyze"**, so a second analysis never submitted (required fields empty, browser validation blocked it silently) | `ProtectedRoute` was a component defined inside `AppContent`; each `loading`/`result` state change produced a new component type and React remounted the page. Pre-existing, on all 13 protected routes | Call it as a plain function. Added `key={result.timestamp}` to `WhatIfSimulator`, whose stale state the remount had been hiding | Playwright: step 3 of the state check produced no `POST /api/predict` at all; request logging showed two posts for three clicks |
+| 69 | Retirement readiness used the old 8-factor rule formula for 20% of its score | `integration_manager` called `FinancialHealthScorer` | Uses `assess_user`; old scorer, its test, the pickle, training script and dataset deleted | Planned follow-up |
+
 ---
 
 ## 16. Change Log (most recent first)
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-04 | Claude Code (Opus 5.5) | Risk model finished: confidence levels (`good`/`limited`/`insufficient`, no score from age alone) across `/api/predict`, `/api/whatif` (shared `compare_scores`) and the chat tools; saved card details (`risk_profile`, `GET/PUT /api/risk-profile`, form pre-fill); `assess_user` from records and the retirement planner switched to it; deleted `financial_health_scorer.py`, its test and `data/` (old pickle, training script, dataset). Fixed a pre-existing remount bug (`ProtectedRoute` defined inside `AppContent`) that wiped the dashboard form after every analysis. 99 tests pass (10 new). Verified through the real app on a DB copy and in a browser: three score states, card save + reload, all 10 pages render, logged-out redirect intact, 0 page errors. §5, §7, §12, §14 #7 #25 #26, §15 #66–#69 |
+| 2026-10-04 | Claude Code (Opus 5.5) | Removed the "Run Analyzer from This Month" button and its result panel from `BudgetManager.jsx` at the user's request (on real imported data it returned "Excellent" from age alone: no income, rent or EMI categorized, no payments, no card). `POST /api/predict/from-budget` and `api.predictFromBudget` still exist but nothing in the UI calls them; the chat tool `analyze_budget_data` still uses the same service. Open issue: the score should say "not enough data" when debt ratio, payment history and card data are all missing |
+| 2026-10-04 | Claude Code (Opus 5.5) | Logging fix in `backend/app.py`: INFO by default (`SMARTFIN_LOG_LEVEL` to override), pdfminer/pdfplumber/botocore/boto3/urllib3 pinned to WARNING so uploaded statements and the Bedrock key are no longer written to `backend.log`. Verified by previewing a sample PDF through the app. Existing log files still hold old data until deleted. §14 #21, §15 #65 |
+| 2026-10-03 | Claude Code (Opus 5.5) | Budget history can now be deleted. Backend: `budget/data_management.py`, `GET /api/budget/data`, `DELETE /api/budget/month/<YYYY-MM>`, `DELETE /api/budget/all` (needs `{"confirm":"DELETE"}`), `GET /api/import/batches`. Frontend: `BudgetDataManager.jsx` "Manage data" card at the bottom of the Budget page (past imports with undo, delete this month, delete everything behind a typed confirmation). All deletes scoped to the logged-in user. 5 new tests (89 pass). Browser-verified against a copy of the database; real DB unchanged. Also killed a stale second backend on port 5000 that was still serving the old scorer. §7, §14 #23–#24, §15 #61–#64 |
+| 2026-10-03 | Claude Code (Opus 5.5) | Replaced the financial health score. New `backend/risk_scorer/` (fetch, features, train, model, service): XGBoost classifier on Give Me Some Credit (149,999 real borrowers, real 2-year distress labels), 5 transferable features, monotone constraints, 5-fold CV AUC 0.858 vs logistic 0.836 (0.828 vs 0.820 without card data), calibrated. Score = percentile within age band; drivers from TreeSHAP. Wired into `/api/predict`, `/api/predict/from-budget`, `/api/whatif`, `/api/model-info` and the 3 chat tools; late/missed counts and age come from the user's own records. Frontend: risk + drivers + model disclosure in `ScoreDisplay.jsx`, optional inputs in `FinancialForm.jsx`, What-If now on EMI/rent. 19 new tests (84 pass). Verified through the real Flask app (routes + chat tools) and a Playwright run against a second backend on 5001, 0 console errors. Not changed: retirement planner still uses the old rule-based scorer; old model files left in `data/`. §5, §12, §14 #19–#22, §15 #55–#60 |
+| 2026-10-03 | Claude Code (Sonnet 5.5) | Budget page history: month picker with prev/next/"This month" inside the expense-history section (shares the page's `month` state), plus filters (text search on note/category, category, source manual/import, min/max amount, clear-all). Cause of "can't see history": page opens on the current month, imported data was 2022-01..2023-10. "Failed to fetch budget summary" = backend not running (port 5000). Frontend build passes; not yet checked in a browser. Only `BudgetManager.jsx` changed |
+| 2026-10-03 | Claude Code (Opus 5.5) | First real-shaped statement from the user failed to import; fixed. Parser accepts `DrCr`-style headers and files with `mode` + `name` columns instead of a narration. Categorizer matches long keywords as word prefixes. Recurring detection gained amount-cluster and calendar-month fallbacks (nameless NEFT salary on a moving pay day), with a tighter amount limit for clusters. 10 new tests (65 pass). Also restored the truncated "Deferred by user" line in §12. §15 #50–#54, §14 #15, #17, #18 |
 | 2026-10-02 | Claude Code (Opus 5.5) | Phase 2 of automatic data entry: recurring-payment detection (`statement_import/recurring.py`, `GET /api/import/recurring`, `RecurringPayments.jsx` card), salary-based monthly income fill with `monthly_budgets.income_source` (manual income never overwritten; undo re-syncs), new `investment` category for SIPs/MFs. New 6-month sample statement; 11 new tests (55 total pass); browser-verified: income ₹45,000 filled for 6 months, exactly 7 real streams detected, 0 console errors |
 | 2026-10-02 | Claude Code (Opus 5.5) | Phase 1 of automatic data entry: bank statement import (`backend/statement_import/`, `StatementImport.jsx`, button on the Budget page). Bank-agnostic CSV/XLS/XLSX/PDF parser (password-protected PDFs), Indian-merchant categorizer + learned user corrections, hash-based dedupe, server-side re-validation, undo. New tables `bank_transactions`, `merchant_category_overrides`, column `expense_entries.source`. 32 new tests on generated sample statements (44/44 total pass); verified live with curl + two Playwright runs. Added `.gitattributes`. Roadmap phases 2–6 recorded in §12 |
 | 2026-10-02 | Claude Code (Opus 5.5) | Portfolio Optimizer data quality: Mid/Small-cap → NIFTY indices, Silver → COMEX×USD/INR, Debt → liquid-fund growth NAV (mfapi.in), giving 7–23 years per asset. Cleaned unadjusted splits / NAV rescale / partial months. Expected returns shrunk toward a risk-based prior; covariance from weekly returns. Risk scores 3–10 now map evenly along the frontier (risk 9 was safer than risk 7). Retrained: 8/9 models, R² −0.47, ML weight 0. Verified live: all 4 endpoints, monotonic risk 1→10 (0.3%→15.4% vol), Playwright UI check with 0 console errors. §15 #30–#37 |
