@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 KEY="${1:-$HOME/.ssh/smartfin}"
 # Inside WSL, Terraform is the Windows program: run with TERRAFORM=terraform.exe
 TERRAFORM="${TERRAFORM:-terraform}"
-out() { "$TERRAFORM" -chdir=../terraform output -raw "$1" | tr -d ''; }
+out() { "$TERRAFORM" -chdir=../terraform output -raw "$1" | tr -d '\r'; }
 
 IP="$(out node_public_ip)"
 
