@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import math
+import sqlite3
 from datetime import date, datetime, timedelta
 
 from risk_scorer.features import build_features
@@ -58,6 +59,20 @@ def user_history(conn, user_id) -> dict:
         history["payments_on_record"] = sum(counts.values())
     except Exception as e:  # a missing table must not take the score endpoint down
         logger.warning("risk_scorer: user history lookup failed: %s", e)
+    try:
+        # Credit-report accounts that did not become SmartFin loans (cards, closed loans, loans missing details).
+        # Accounts that did are already counted through their loan_payments above.
+        since_month = (date.today() - timedelta(days=HISTORY_WINDOW_DAYS)).strftime("%Y-%m")
+        late, missed, months = conn.execute(
+            """SELECT COALESCE(SUM(h.dpd >= 30 AND h.dpd < 90), 0), COALESCE(SUM(h.dpd >= 90), 0), COUNT(*)
+               FROM credit_account_history h JOIN credit_accounts a ON a.id = h.account_id
+               WHERE a.user_id = ? AND a.loan_id IS NULL AND h.month >= ?""", (user_id, since_month)).fetchone()
+        if months:
+            history["times_late"] = history.get("times_late", 0) + late
+            history["times_seriously_late"] = history.get("times_seriously_late", 0) + missed
+            history["payments_on_record"] = history.get("payments_on_record", 0) + months
+    except sqlite3.OperationalError:
+        pass  # credit report tables not created yet
     history.update({k: v for k, v in get_risk_profile(conn, user_id).items() if v is not None})
     return history
 

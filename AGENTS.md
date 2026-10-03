@@ -105,6 +105,12 @@ smartfin-copy/
 │   │   ├── api.py                      ← Blueprint at /api/import/
 │   │   └── migrations.py               ← bank_transactions, merchant_category_overrides, expense_entries.source
 │   ├── unit_test/fixtures/statements/  ← SAMPLE statements (HDFC/SBI/Axis/ICICI layouts, protected PDF, 6-month HDFC) + make_fixtures.py
+│   ├── credit_report/                  ← Credit bureau report (PDF) → loans, payment history, card details
+│   │   ├── parser.py                   ← Label-based text parser (bureau-agnostic); two payment-history layouts; PDF passwords
+│   │   ├── service.py                  ← preview → confirm → undo; account identity hash; DPD → on-time/late/missed; EMI formula
+│   │   ├── api.py                      ← Blueprint at /api/import/credit-report
+│   │   └── migrations.py               ← credit_report_imports, credit_accounts, credit_account_history
+│   ├── unit_test/fixtures/credit_reports/ ← SAMPLE reports (CIBIL-style, Experian-style, protected PDF, txt) + make_fixtures.py
 │   ├── retirement_planning/            ← Isolated domain package for retirement workflows
 │   │   ├── api.py                      ← Blueprint at /api/retirement/
 │   │   └── migrations.py              ← Creates retirement DB tables on startup
@@ -140,6 +146,7 @@ smartfin-copy/
 │   │   ├── StatementImport.jsx         ← Import modal (opened from BudgetManager): upload → password → preview/edit → import → undo
 │   │   ├── RecurringPayments.jsx       ← Budget-page card: detected income / fixed costs / investing per month + each stream
 │   │   ├── BudgetDataManager.jsx       ← Budget-page "Manage data" card: past imports (undo), delete this month, delete all (typed DELETE)
+│   │   ├── CreditReportImport.jsx      ← Import dialog on the Loans page (portal on <body>): upload → password → preview/edit → import → undo
 │   │   └── ...                         ← All other existing components UNTOUCHED
 │   └── services/api.js                 ← Axios client — has generic api.get() / api.post()
 ├── STANDALONE_APP_IDEAS.md             ← Saved ideas for separate apps (EMI decoder, scam checker, …)
@@ -215,6 +222,7 @@ Left out on purpose: `MonthlyIncome` (US dollars; income still enters via the ra
 - Guidance, alerts, spending patterns and investment suggestions around the score are **still hand-written rules**.
 - **Confidence (2026-10-04):** every assessment carries `confidence` + `missing[]`. `good` = payment history (stated, or ≥1 payment on record) or card data known; `limited` = only the debt ratio known (UI shows an amber low-confidence banner); `insufficient` = none of them → `score` and `risk_probability` are `null`, classification is "Not enough data", and the UI lists what to add. An empty payment record is not treated as a clean one. The rule-based advice gets a neutral 50 in that case (`NEUTRAL_RULE_SCORE`).
 - **Saved card details:** `risk_profile(user_id, card_limit, card_balance)`. Typing a card limit into the score form while logged in saves it; the form pre-fills it next time; `GET/PUT /api/risk-profile` (PUT with `card_limit: null` clears).
+- **Payment history from a credit report (2026-10-04):** `user_history` = `loan_payments` of the user's loans (which include payments created by a credit-report import) **plus** `credit_account_history` of accounts that did not become loans (cards, closed loans, loans missing details), last 730 days. Days past due map the way the model's inputs are defined: <30 → on-time, 30–89 → late, 90+ → missed. Open cards' total limit and balance become `risk_profile`. Known limit: each reported *month* at 90+ counts once, so a loan stuck in default for many months counts many times; the training data's "number of times" may count such a spell less.
 - **`assess_user(conn, user_id)`** scores from records alone: income = latest budget with income, EMI = sum of active loans' `monthly_emi`, rent = detected recurring rent (else latest month's rent expenses), plus history and saved card. The **retirement planner** uses it for the 20% financial-health part of readiness; with insufficient data it raises and the planner falls back to its neutral 50.
 
 **Retrain:**
@@ -404,6 +412,18 @@ merchant_category_overrides (user_id, merchant (lowercase), category, updated_at
 -- bank_transactions.category also allows 'income', 'transfer', 'investment' (never become expenses)
 ```
 
+### Credit report import (created at startup by `credit_report/migrations.py`)
+```sql
+credit_report_imports (batch_id PK, user_id, bureau, score, accounts, prev_card_limit, prev_card_balance, card_details_set, imported_at)
+credit_accounts (id PK UUID, user_id, account_hash, lender, account_type, kind CHECK(loan|card), account_number, opened, closed,
+                 sanctioned, balance, overdue, emi, tenure_months, interest_rate, loan_id (→ loans, nullable), import_batch_id,
+                 created_at, updated_at, UNIQUE(user_id, account_hash))
+credit_account_history (account_id, month 'YYYY-MM', dpd, PK(account_id, month))   -- days past due per reported month
+risk_profile (user_id PK, card_limit, card_balance, updated_at)                     -- from risk_scorer/migrations.py
+-- account_hash = sha256(lender | type | account number | opened), lowercased alphanumerics only, so the same account matches across bureaus' layouts
+-- Imported loans are ordinary rows in `loans`; their monthly history becomes `loan_payments` (payment_date = first of the month, amount = EMI)
+```
+
 ### Chat
 ```sql
 chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, updated_at)
@@ -470,6 +490,12 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - `GET /batches` — past imports (batch id, imported date, period, counts, totals), so an import can be undone later
 - `DELETE /batch/<batch_id>` — undo one import (removes its transactions and the expenses it created, re-syncs import-set income)
 - `confirm` also returns `income_set` {month: amount} and `income_kept_manual` [months]
+
+### Credit Report Import (prefix: `/api/import/credit-report`)
+- `POST /preview` — multipart `file` (+ optional `password`) → accounts with history, 24-month late/missed counts, how each will be imported and what it still `needs`. 422 + `password_required` for locked PDFs. Saves nothing
+- `POST /confirm` — `{rows, bureau, score}` (rows as edited; `include:false` to skip) → loans, payments, history, card details. Server re-validates and recomputes everything
+- `GET ` (no suffix) — past imports + stored accounts with their 24-month counts
+- `DELETE /<batch_id>` — undo: removes the accounts that import added, with their loans and payments; restores the previous saved card details
 
 ### Nudge Engine (prefix: `/api/nudges`)
 - `POST /scan`, `GET /history`, `GET /patterns`
@@ -560,7 +586,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - [ ] **ACTIVE ROADMAP — automatic data entry → Financial Digital Twin** (agreed 2026-10-02). Manual entry is why finance apps get abandoned, and the digital twin needs real history:
   1. [x] **Bank statement import** (CSV/XLS/XLSX/PDF incl. password-protected) → preview → categorize → budget expenses. Done 2026-10-02, see §15 #38–#44. ⚠️ Built and tested on SAMPLE statements only; validate with a real, redacted statement from the user before relying on it for a given bank.
   2. [x] **Recurring detection + income** — done 2026-10-02 (§15 #45–#49). Rent/EMI/SIP/bills/salary detected from ≥3 occurrences; monthly income filled from salary credits; new `investment` category; Recurring payments card on the Budget page.
-  3. [ ] **Credit report → loans** (CIBIL/Experian PDF lists every loan with EMI, outstanding, payment history) and **CAS → mutual funds** (`casparser` library).
+  3. [~] **Credit report → loans** — done 2026-10-04 (§15 #70–#73): bureau PDF → loans + payment history + card details, feeding the risk model. ⚠️ Built on SAMPLE reports in two approximated layouts; needs a real redacted report per bureau. **CAS → mutual funds** (`casparser`) not started.
   4. [ ] **Chat quick-entry** — `add_expense` tool on the chat agent ("spent 450 on lunch").
   5. [ ] **Financial Digital Twin** — safe-to-spend, goal-success probability (Monte Carlo on the user's own history), personal inflation, what-if sliders (see Feature ideas backlog #1–#2).
   6. [ ] **Account Aggregator sandbox** (Setu) — consent flow; the production path (real AA access needs a regulated FIU).
@@ -605,6 +631,7 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 | How is security handled? | JWT auth, hashed passwords (werkzeug/bcrypt), protected routes, ownership checks, OTP/email verification |
 | How do you prevent SQL injection? | Every query with user input uses `?` parameter binding, so values never become SQL. The few dynamically built queries only interpolate fixed column literals or `?` placeholder lists. Table names (which can't be bound) go through an allowlist check, `_safe_table_identifier()` in `db_utils.py`. Inputs are also type-cast (`float`/`int`/`strptime`), categories are allowlisted, and every update/delete is scoped with `AND user_id = ?` |
 | How do users get data in without typing everything? | Upload a bank/UPI statement (CSV/Excel/PDF, even password-protected). A bank-agnostic parser finds the transaction table by column meaning, a rulebook of Indian merchants categorizes UPI narrations, the user reviews a preview, and corrections are learned per merchant. Re-uploads are de-duplicated by transaction hash; any import can be undone. Production path: RBI's Account Aggregator framework |
+| Where does the risk model get payment history? | From a credit bureau report the user uploads: each account's month-by-month days past due. The parser finds fields by label rather than by position, so one parser reads different bureaus' layouts; open loans become loans with a payment per month, cards give the utilization, and re-uploading a newer report updates accounts instead of duplicating them. I only had sample reports to build against, and I say so |
 | How does what-if work? | Backend predicts both current and modified scenarios, returns score delta and impact label |
 | How is explainability addressed? | Return classification labels, financial ratios, warnings, and guidance alongside prediction |
 | Is this just ML demo? | No — complete user journey: auth, profile, budget, loans, goals, retirement planner, AI chat assistant |
@@ -639,6 +666,8 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 24. **Two processes can listen on port 5000 at once on Windows** (both bind `0.0.0.0:5000`), and the older one keeps answering. If a restart seems to have no effect, run `netstat -ano | grep :5000` and look for more than one PID; `curl localhost:5000/` shows which model is answering.
 25. **Never define a component inside another component and render it as JSX.** `ProtectedRoute` lived inside `AppContent`, so every state change made it a new component type and React remounted the whole page, wiping form state (§15 #68). It is now called as a plain function: `element={ProtectedRoute({ children: (...) })}`.
 26. **Playwright checks: assert on something that can only appear if the feature worked.** A `waitForSelector('text=Credit-card utilization')` passed while the card data was never submitted, because that driver row is always rendered. Log the request body or assert the value.
+27. **Credit report import is validated on SAMPLE reports only** (`unit_test/fixtures/credit_reports/`, generated; the CIBIL-style and Experian-style layouts are approximations from general knowledge, not copied from real reports). Expect to adjust `_LABELS` in `credit_report/parser.py` for a real report: it is a list of label synonyms, so adding one is a one-line change. The parser raises a clear error when it finds no accounts. Never ask the user to paste a real report into the chat; ask for the error and the label wording.
+28. **Modals must be portalled to `<body>`** (`createPortal`). The page layouts create stacking contexts, so a `fixed z-50` dialog rendered inside a page sits *below* the site footer (`z-20` in a higher context), which then swallows clicks on the dialog's buttons (§15 #72). `StatementImport.jsx` is not portalled and happens to work on the Budget page; portal it if it ever misbehaves.
 
 ---
 
@@ -784,12 +813,25 @@ Privacy answer given to the user (2026-10-03): statement files and PDF passwords
 | 68 | **Dashboard form was wiped after every "Analyze"**, so a second analysis never submitted (required fields empty, browser validation blocked it silently) | `ProtectedRoute` was a component defined inside `AppContent`; each `loading`/`result` state change produced a new component type and React remounted the page. Pre-existing, on all 13 protected routes | Call it as a plain function. Added `key={result.timestamp}` to `WhatIfSimulator`, whose stale state the remount had been hiding | Playwright: step 3 of the state check produced no `POST /api/predict` at all; request logging showed two posts for three clicks |
 | 69 | Retirement readiness used the old 8-factor rule formula for 20% of its score | `integration_manager` called `FinancialHealthScorer` | Uses `assess_user`; old scorer, its test, the pickle, training script and dataset deleted | Planned follow-up |
 
+### Session 2026-10-04 (cont.) — credit report import, roadmap Phase 3 (`main`, uncommitted)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 70 | The risk model's main inputs (late/missed payments, card utilization) had to be typed by hand, and a user with no loan records got "not enough data" | Nothing brought credit history into SmartFin | `credit_report/`: bureau PDF → accounts → loans + `loan_payments` + `credit_account_history` + `risk_profile`; `user_history` reads all of it | Planned (roadmap Phase 3) |
+| 71 | Bureaus use different layouts and no real report was available | — | One label-driven text parser (synonym list per field, account starts at each lender label) that handles both a status-row-over-month-row history and a year × month grid; verified to extract identical accounts from both sample layouts | Designed up front |
+| 72 | Dialog buttons unclickable on the Loans page | Footer overlaid the dialog (stacking context, §14 #28) | `createPortal(..., document.body)` | Playwright: "footer intercepts pointer events" |
+| 73 | Re-uploading a report (or the same person's report from another bureau) would duplicate loans and double-count late payments | Needs account identity across files | `account_hash` on normalized lender/type/number/opening date; existing accounts are updated and only new months added | Test: Experian-layout file after the CIBIL-layout one → 0 added, 5 updated, 0 new payments |
+
+Also this session: 5 commits on `main` (statement-import fixes, risk model, budget data management, remount fix, docs); deleted `backend/backend.log` and a 167 MB `backend.log` at the repo root that held the Bedrock key and a full pdfminer trace of the user's statement. **The user still has to rotate the Bedrock key.**
+
 ---
 
 ## 16. Change Log (most recent first)
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-04 | Claude Code (Opus 5.5) | The user's real CIBIL report failed to import: the PDF is image-only (4.8 MB, 20 characters of text), so no label fix can help; it needs OCR, which is not installed (no Tesseract, no OCR Python package; `pypdfium2` and `PIL` are present for rendering). Added `CreditReportNoTextError` with a plain message instead of "couldn't find any credit accounts", and `credit_report/describe_layout.py`: a CLI the user runs locally that prints a REDACTED layout skeleton (digits → 9, non-vocabulary words → x) or, for image PDFs, page/picture/text-object counts. Use it whenever a real report or its labels are needed; never ask for the report itself. 46 credit-report tests (145 total). OCR support is an open decision for the user |
+| 2026-10-04 | Claude Code (Opus 5.5) | Credit report import (roadmap Phase 3, loans half). `backend/credit_report/` (parser, service, api, migrations), `CreditReportImport.jsx` + button on the Loans page, 4 client calls in `api.js`, `risk_scorer.user_history` extended to count imported account history. Password-protected PDFs, preview with editable EMI/tenure/rate, server-side re-validation, re-import updates, undo restores previous card details. 44 new tests (143 pass) on generated SAMPLE reports in two layouts; browser-verified on a DB copy (before: "not enough data"; after import: scored from 5 late + 1 missed + 28% utilization with nothing typed; undo clean; 0 console errors). Earlier in the session: committed all prior work in 5 commits, deleted the old logs. §3, §5, §6, §7, §12, §14 #27–#28, §15 #70–#73 |
 | 2026-10-04 | Claude Code (Opus 5.5) | Risk model finished: confidence levels (`good`/`limited`/`insufficient`, no score from age alone) across `/api/predict`, `/api/whatif` (shared `compare_scores`) and the chat tools; saved card details (`risk_profile`, `GET/PUT /api/risk-profile`, form pre-fill); `assess_user` from records and the retirement planner switched to it; deleted `financial_health_scorer.py`, its test and `data/` (old pickle, training script, dataset). Fixed a pre-existing remount bug (`ProtectedRoute` defined inside `AppContent`) that wiped the dashboard form after every analysis. 99 tests pass (10 new). Verified through the real app on a DB copy and in a browser: three score states, card save + reload, all 10 pages render, logged-out redirect intact, 0 page errors. §5, §7, §12, §14 #7 #25 #26, §15 #66–#69 |
 | 2026-10-04 | Claude Code (Opus 5.5) | Removed the "Run Analyzer from This Month" button and its result panel from `BudgetManager.jsx` at the user's request (on real imported data it returned "Excellent" from age alone: no income, rent or EMI categorized, no payments, no card). `POST /api/predict/from-budget` and `api.predictFromBudget` still exist but nothing in the UI calls them; the chat tool `analyze_budget_data` still uses the same service. Open issue: the score should say "not enough data" when debt ratio, payment history and card data are all missing |
 | 2026-10-04 | Claude Code (Opus 5.5) | Logging fix in `backend/app.py`: INFO by default (`SMARTFIN_LOG_LEVEL` to override), pdfminer/pdfplumber/botocore/boto3/urllib3 pinned to WARNING so uploaded statements and the Bedrock key are no longer written to `backend.log`. Verified by previewing a sample PDF through the app. Existing log files still hold old data until deleted. §14 #21, §15 #65 |

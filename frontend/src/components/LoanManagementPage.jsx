@@ -7,6 +7,7 @@ import PaymentHistoryView from './PaymentHistoryView';
 import Sidebar from './Sidebar';
 import SmartFinFooter from './SmartFinFooter';
 import api from '../services/api';
+import CreditReportImport from './CreditReportImport';
 
 function LoanManagementPage() {
   const [view, setView] = useState('list'); // 'list', 'create', 'edit', 'payment'
@@ -15,6 +16,7 @@ function LoanManagementPage() {
   const [loans, setLoans] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [reportImportOpen, setReportImportOpen] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -193,14 +195,24 @@ function LoanManagementPage() {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-bold text-white">Your Loans</h2>
-                <button
-                  onClick={() => setView('create')}
-                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 transition-all text-sm font-medium flex items-center gap-2"
-                >
-                  <iconify-icon icon="solar:add-circle-linear" width="18"></iconify-icon>
-                  Add Loan
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setReportImportOpen(true)}
+                    className="px-4 py-2 rounded-lg border border-purple-400/40 bg-purple-500/10 hover:bg-purple-500/20 text-purple-200 transition-all text-sm font-medium flex items-center gap-2"
+                  >
+                    <iconify-icon icon="solar:document-add-linear" width="18"></iconify-icon>
+                    Import credit report
+                  </button>
+                  <button
+                    onClick={() => setView('create')}
+                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 transition-all text-sm font-medium flex items-center gap-2"
+                  >
+                    <iconify-icon icon="solar:add-circle-linear" width="18"></iconify-icon>
+                    Add Loan
+                  </button>
+                </div>
               </div>
+              <CreditReportImport open={reportImportOpen} onClose={() => setReportImportOpen(false)} onImported={fetchLoans} />
 
               <LoanListView
                 loans={loans}

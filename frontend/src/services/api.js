@@ -910,6 +910,59 @@ const api = {
     }
   },
 
+  async previewCreditReport(file, password = '') {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    const form = new FormData();
+    form.append('file', file);
+    if (password) form.append('password', password);
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/import/credit-report/preview`, form, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      const err = new Error(error?.response?.data?.error || 'Failed to read the credit report');
+      err.passwordRequired = Boolean(error?.response?.data?.password_required);
+      throw err;
+    }
+  },
+
+  async confirmCreditReport(rows, bureau, score) {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    try {
+      const response = await axios.post(`${API_BASE_URL}/api/import/credit-report/confirm`, { rows, bureau, score }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error?.response?.data?.error || 'Failed to import the credit report');
+    }
+  },
+
+  async listCreditReports() {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    const response = await axios.get(`${API_BASE_URL}/api/import/credit-report`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data;
+  },
+
+  async undoCreditReport(batchId) {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    try {
+      const response = await axios.delete(`${API_BASE_URL}/api/import/credit-report/${batchId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error?.response?.data?.error || 'Failed to undo the import');
+    }
+  },
+
   async getRiskProfile() {
     const token = this.getStoredToken();
     if (!token) throw new Error('No authentication token found');

@@ -94,6 +94,8 @@ from legacy_scorer.api import legacy_scorer_bp
 from statement_import.api import statement_import_bp
 from statement_import.migrations import create_tables as create_statement_import_tables
 from risk_scorer.migrations import create_tables as create_risk_scorer_tables
+from credit_report.api import credit_report_bp
+from credit_report.migrations import create_tables as create_credit_report_tables
 from legacy_scorer.model import model_data, model_metadata
 
 from db_core import DB_PATH, get_db, close_connection, execute_query, row_to_dict, rows_to_list
@@ -353,6 +355,7 @@ def init_db():
     RetirementPlanningMigrations.create_tables(DB_PATH)
     create_statement_import_tables(DB_PATH)
     create_risk_scorer_tables(DB_PATH)
+    create_credit_report_tables(DB_PATH)
 
 # Initialize database
 init_db()
@@ -365,6 +368,7 @@ app.register_blueprint(loans_bp)
 app.register_blueprint(chat_bp)
 app.register_blueprint(calculators_bp)
 app.register_blueprint(legacy_scorer_bp)
+app.register_blueprint(credit_report_bp)
 app.register_blueprint(statement_import_bp)
 
 
