@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from datetime import timedelta
 import os
 import sqlite3
+import dbapi
 import logging
 
 # Configure logging - MUST be before Flask app creation
@@ -169,13 +170,17 @@ app.register_blueprint(budget_bp)
 # Global error handler
 @app.errorhandler(Exception)
 def handle_all_errors(error):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(error, HTTPException):
+        # 404 for an unknown address, 405 for a wrong method, 413 for an oversized upload: not server faults.
+        return jsonify({'success': False, 'error': error.description}), error.code
     import traceback
     logger.error(f"Unhandled exception: {str(error)}\n{traceback.format_exc()}")
     return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
 def init_db():
     """Initialize the database with required tables"""
-    db = sqlite3.connect(DB_PATH)
+    db = dbapi.connect(DB_PATH)
     cur = db.cursor()
     
     # Users table (existing)

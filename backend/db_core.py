@@ -5,6 +5,7 @@ Uses Flask's `g` to keep one connection per request context.
 
 import os
 import sqlite3
+import dbapi
 
 from flask import g
 
@@ -21,7 +22,7 @@ UPLOAD_DIR = os.path.join(DATA_DIR, 'uploads', 'profile_pictures')
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
-        db = g._database = sqlite3.connect(DB_PATH)
+        db = g._database = dbapi.connect(DB_PATH)   # SQLite file, or PostgreSQL when DATABASE_URL is set
         db.row_factory = sqlite3.Row
     return db
 

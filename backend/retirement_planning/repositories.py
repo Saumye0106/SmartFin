@@ -9,6 +9,10 @@ Provides data access abstraction for:
 """
 
 import sqlite3
+try:
+    import dbapi
+except ImportError:  # imported as backend.<package> in some tests
+    from backend import dbapi
 import json
 import uuid
 import os
@@ -35,7 +39,7 @@ class BaseRepository:
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get database connection"""
-        conn = sqlite3.connect(self.db_path)
+        conn = dbapi.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
     

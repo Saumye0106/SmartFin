@@ -3,6 +3,7 @@ ProfileService - Business logic for user profile management
 """
 
 import sqlite3
+import dbapi
 import json
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -22,7 +23,7 @@ class ProfileService:
     
     def _get_connection(self):
         """Get database connection"""
-        conn = sqlite3.connect(self.db_path)
+        conn = dbapi.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
     

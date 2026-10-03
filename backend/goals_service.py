@@ -3,6 +3,7 @@ GoalsService - Business logic for financial goals management
 """
 
 import sqlite3
+import dbapi
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -22,7 +23,7 @@ class GoalsService:
     
     def _get_connection(self):
         """Get database connection"""
-        conn = sqlite3.connect(self.db_path)
+        conn = dbapi.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
     

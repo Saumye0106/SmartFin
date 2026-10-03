@@ -288,7 +288,8 @@ def confirm(conn, user_id: int, rows: list[dict], bureau: str | None = None, sco
                  row["emi"], row["tenure_months"], row["interest_rate"], loan_id, batch_id, now, now))
             result["accounts_added"] += 1
         for month, dpd in new_months.items():
-            conn.execute("INSERT OR IGNORE INTO credit_account_history (account_id, month, dpd) VALUES (?,?,?)",
+            conn.execute("INSERT INTO credit_account_history (account_id, month, dpd) VALUES (?,?,?) "
+                         "ON CONFLICT (account_id, month) DO NOTHING",
                          (account_id, month, dpd))
         result["history_months"] += len(new_months)
         result["cards"] += row["kind"] == "card"
@@ -353,7 +354,8 @@ def list_imports(conn, user_id: int) -> dict:
         a = dict(zip(("id", "lender", "account_type", "kind", "account_number", "opened", "closed", "sanctioned",
                       "balance", "overdue", "emi", "loan_id"), r))
         late, missed, months = conn.execute(
-            "SELECT COALESCE(SUM(dpd >= ? AND dpd < ?), 0), COALESCE(SUM(dpd >= ?), 0), COUNT(*) "
+            "SELECT COALESCE(SUM(CASE WHEN dpd >= ? AND dpd < ? THEN 1 ELSE 0 END), 0), "
+            "COALESCE(SUM(CASE WHEN dpd >= ? THEN 1 ELSE 0 END), 0), COUNT(*) "
             "FROM credit_account_history WHERE account_id = ? AND month >= ?",
             (LATE_DPD, MISSED_DPD, MISSED_DPD, a.pop("id"), since)).fetchone()
         accounts.append({**a, "late_24m": late, "missed_24m": missed, "months_24m": months})

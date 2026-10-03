@@ -4,13 +4,14 @@ Useful for testing or fixing accounts
 """
 
 import sqlite3
+import dbapi
 import os
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth.db')
 
 def list_users():
     """List all users"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = dbapi.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT id, username, phone FROM users')
     users = cursor.fetchall()
@@ -19,7 +20,7 @@ def list_users():
 
 def add_phone_to_user(user_id, phone):
     """Add phone number to a specific user"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = dbapi.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('UPDATE users SET phone = ? WHERE id = ?', (phone, user_id))
     conn.commit()

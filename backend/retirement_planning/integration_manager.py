@@ -45,11 +45,10 @@ class IntegrationManager:
                 score = financial_health_scorer.calculate_score(user_id)
             else:
                 # The risk model, fed from the user's own SmartFin records.
-                import sqlite3
+                import dbapi
                 from db_core import DB_PATH
                 from risk_scorer.service import assess_user
-                conn = sqlite3.connect(DB_PATH)
-                conn.row_factory = sqlite3.Row
+                conn = dbapi.connect(DB_PATH)
                 try:
                     assessment = assess_user(conn, user_id)
                 finally:

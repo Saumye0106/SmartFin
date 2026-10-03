@@ -155,8 +155,9 @@ def confirm(conn, user_id: int, raw_rows: list[dict]) -> dict:
             continue
         txn_id = str(uuid.uuid4())
         cur = conn.execute(
-            "INSERT OR IGNORE INTO bank_transactions (id, user_id, txn_date, description, merchant, amount, "
-            "direction, balance, category, import_batch_id, txn_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO bank_transactions (id, user_id, txn_date, description, merchant, amount, "
+            "direction, balance, category, import_batch_id, txn_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT (user_id, txn_hash) DO NOTHING",
             (txn_id, user_id, r["date"], r["description"], r["merchant"], r["amount"], r["direction"],
              r["balance"], r["category"], batch_id, r["txn_hash"]),
         )
@@ -219,8 +220,8 @@ def list_batches(conn, user_id: int) -> list[dict]:
         """SELECT import_batch_id AS batch_id, MIN(created_at) AS imported_at,
                   MIN(txn_date) AS period_start, MAX(txn_date) AS period_end,
                   COUNT(*) AS transactions, COUNT(expense_id) AS expenses,
-                  ROUND(SUM(CASE WHEN direction = 'debit' THEN amount ELSE 0 END), 2) AS total_debit,
-                  ROUND(SUM(CASE WHEN direction = 'credit' THEN amount ELSE 0 END), 2) AS total_credit
+                  ROUND(CAST(SUM(CASE WHEN direction = 'debit' THEN amount ELSE 0 END) AS NUMERIC), 2) AS total_debit,
+                  ROUND(CAST(SUM(CASE WHEN direction = 'credit' THEN amount ELSE 0 END) AS NUMERIC), 2) AS total_credit
            FROM bank_transactions WHERE user_id = ? AND import_batch_id IS NOT NULL
            GROUP BY import_batch_id ORDER BY imported_at DESC""", (user_id,)).fetchall()
     return [dict(r) for r in rows]

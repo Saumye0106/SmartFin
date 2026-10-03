@@ -1,10 +1,11 @@
 """Tables for bank-statement import. Idempotent; run at app startup."""
 
 import sqlite3
+import dbapi
 
 
 def create_tables(db_path: str) -> None:
-    conn = sqlite3.connect(db_path)
+    conn = dbapi.connect(db_path)
     try:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS bank_transactions (
@@ -35,13 +36,11 @@ def create_tables(db_path: str) -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
         """)
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(expense_entries)")}
-        if cols and "source" not in cols:
-            conn.execute("ALTER TABLE expense_entries ADD COLUMN source TEXT DEFAULT 'manual'")
+        if dbapi.table_exists(conn, "expense_entries"):
+            dbapi.add_column_if_missing(conn, "expense_entries", "source", "TEXT DEFAULT 'manual'")
         # 'manual' income is never overwritten by imports; 'import' income is kept in sync with imported salary.
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(monthly_budgets)")}
-        if cols and "income_source" not in cols:
-            conn.execute("ALTER TABLE monthly_budgets ADD COLUMN income_source TEXT DEFAULT 'manual'")
+        if dbapi.table_exists(conn, "monthly_budgets"):
+            dbapi.add_column_if_missing(conn, "monthly_budgets", "income_source", "TEXT DEFAULT 'manual'")
         conn.commit()
     finally:
         conn.close()

@@ -10,7 +10,7 @@
 **SmartFin** is a personal finance management web application built as a portfolio/academic project. The goal is to demonstrate real, interview-worthy ML modules rather than fake heuristic models.
 
 - **Stack:** Flask (Python) backend + React (Vite) frontend
-- **Database:** SQLite (`auth.db`)
+- **Database:** SQLite (`auth.db`) locally by default; **PostgreSQL** when `DATABASE_URL` is set (containers, AWS). Same code and SQL for both, via `backend/dbapi.py`
 - **Auth:** Flask-JWT-Extended (Bearer tokens)
 - **Port:** Backend → `5000`, Frontend (dev) → `5173`
 - **Target Audience:** Students and early-career professionals in India
@@ -68,7 +68,8 @@ docker build --target test backend         # runs the test suite inside the Linu
 smartfin-copy/
 ├── backend/
 │   ├── app.py                          ← Flask app factory — config, CORS, DB init, blueprint registration ONLY (393 lines, zero @app.route left)
-│   ├── db_core.py                      ← Shared SQLite helpers (get_db, execute_query, row_to_dict, rows_to_list) used by every blueprint
+│   ├── db_core.py                      ← Request-scoped connection + helpers (get_db, execute_query, row_to_dict, rows_to_list); DATA_DIR / DB_PATH / UPLOAD_DIR
+│   ├── dbapi.py                        ← **The only place a database is opened.** `connect(path)` → SQLite, or a PostgreSQL connection that behaves like sqlite3 when `DATABASE_URL` is set
 │   ├── auth.db                         ← SQLite database (users, expenses, loans, goals, etc.)
 │   ├── auth/api.py                     ← Blueprint: register/login/refresh/protected, email verification, password reset, Twilio OTP (16 routes)
 │   ├── profile_management/api.py       ← Blueprint: profile CRUD, picture upload/delete, goals CRUD (10 routes). Named _management to avoid shadowing stdlib `profile`
@@ -679,6 +680,8 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 26. **Playwright checks: assert on something that can only appear if the feature worked.** A `waitForSelector('text=Credit-card utilization')` passed while the card data was never submitted, because that driver row is always rendered. Log the request body or assert the value.
 27. **Credit report import is validated on SAMPLE reports only** (`unit_test/fixtures/credit_reports/`, generated; the CIBIL-style and Experian-style layouts are approximations from general knowledge, not copied from real reports). Expect to adjust `_LABELS` in `credit_report/parser.py` for a real report: it is a list of label synonyms, so adding one is a one-line change. The parser raises a clear error when it finds no accounts. Never ask the user to paste a real report into the chat; ask for the error and the label wording.
 28. **Modals must be portalled to `<body>`** (`createPortal`). The page layouts create stacking contexts, so a `fixed z-50` dialog rendered inside a page sits *below* the site footer (`z-20` in a higher context), which then swallows clicks on the dialog's buttons (§15 #72). `StatementImport.jsx` is not portalled and happens to work on the Budget page; portal it if it ever misbehaves.
+29. **Never call `sqlite3.connect` directly in backend code; use `dbapi.connect(path)`.** Otherwise that code silently keeps using a local file when the app runs on PostgreSQL. New SQL must run on both: no `INSERT OR IGNORE/REPLACE`, `PRAGMA`, `sqlite_master`, `date('now')`/`strftime` in SQL, boolean `SUM(...)`, or `ROUND(float, n)`; PostgreSQL also rejects double-quoted string literals and non-aggregated columns missing from `GROUP BY`. Add a call to `unit_test/api_walkthrough.py` for any new endpoint so both databases are compared.
+30. **Unknown URLs used to return 500** (the catch-all error handler swallowed 404/405). Fixed 2026-10-04: HTTP errors keep their status. Also: the Nudge Engine has no `POST /api/nudges/scan`; the scan is `GET /api/nudges/` (§5 and §7 list it wrongly).
 
 ---
 
@@ -845,6 +848,15 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 | 77 | Three components called `http://127.0.0.1:5000` directly | Bypassed `API_BASE_URL` | Export `API_BASE_URL` from `api.js` and use it; `??` instead of `||` so an empty value means "same address" | grep for hardcoded hosts |
 | 78 | Port 8080 on this machine is taken by another program on `[::1]` | — | Compose publishes 8088; test with `127.0.0.1`, not `localhost` | `netstat` before starting the stack |
 
+### Session 2026-10-04 (cont.) — PostgreSQL migration (`main`, uncommitted)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 79 | The app could only run on a SQLite file | 23 direct `sqlite3.connect` calls, a few SQLite-only statements | `dbapi.py` adapter + portable SQL (§17) | Planned; user decided on PostgreSQL/RDS |
+| 80 | **On PostgreSQL every statement was committed immediately**; `rollback()` did nothing, so a failed multi-step import would have left partial data | The per-statement savepoint used psycopg's `connection.transaction()`, which is a full transaction (commit on exit) when none is open | Savepoints issued as plain SQL (`SAVEPOINT` / `RELEASE` / `ROLLBACK TO`) inside the implicit transaction | My own test asserted a table created before `rollback()` was gone, and it wasn't. The 75-call walkthrough had passed identically: it has no failing multi-step write |
+| 81 | Unknown URLs answered 500 | Catch-all `@app.errorhandler(Exception)` also caught `NotFound` | Pass `HTTPException` through with its own status | A wrong path in the walkthrough returned 500 |
+| 82 | A Dockerfile line ended in a literal `\n` | Wrote the edit through a shell heredoc that didn't interpret the escape | Fixed with the Edit tool | Read the file back |
+
 ---
 
 ## 17. Deployment (AWS) — plan and status
@@ -856,8 +868,8 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 | Phase | What | Status |
 |---|---|---|
 | 1 | App configurable from the environment | ✅ 2026-10-04 |
-| 2 | Docker images + compose, tests inside the image | ✅ 2026-10-04 (SQLite; compose gets a `postgres` service in phase 3) |
-| 3 | **PostgreSQL migration** (sub-steps below) | ⬜ next |
+| 2 | Docker images + compose, tests inside the image | ✅ 2026-10-04 |
+| 3 | **PostgreSQL migration** | ✅ 2026-10-04 (details below) |
 | 4 | Uploads (profile pictures) to S3, so more than one backend replica can run | ⬜ |
 | 5 | Terraform: VPC, EC2, security groups, ECR, **RDS PostgreSQL** (or none if Postgres runs in-cluster), S3 (uploads, backups, Terraform state), IAM role (Bedrock, ECR pull, S3), secrets | ⬜ |
 | 6 | Ansible: install/harden k3s on the instance | ⬜ |
@@ -865,21 +877,43 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 | 8 | GitHub Actions: tests on SQLite **and** PostgreSQL → build → push to ECR → roll out | ⬜ (existing `deploy.yml` publishes the frontend to GitHub Pages) |
 | 9 | Operations: CloudWatch logs/alarms, database restore test, teardown script, HTTPS | ⬜ |
 
-**PostgreSQL migration — measured scope (2026-10-04):** 21 backend files import `sqlite3`, 23 `sqlite3.connect` sites, 244 SQL statements, ~26 tables, and 53 test files that open SQLite directly. Dialect-specific spots: 25 `strftime`/`date('now')`/`datetime('now')`, 12 `row_factory`, 6 `substr(`, 5 `lastrowid`, 3 `INSERT OR IGNORE/REPLACE`, 3 `PRAGMA`, 3 `sqlite_master`, 2 `AUTOINCREMENT`, 2 `executescript`, 2 boolean `SUM(x >= ?)`, 2 `ALTER TABLE`.
+**PostgreSQL migration — done 2026-10-04.** Measured scope beforehand: 21 files importing `sqlite3`, 23 connect sites, 244 SQL statements, 21 tables. It turned out far smaller than estimated because almost all of the SQL was already portable; the work was one adapter plus eight statement rewrites.
 
-Recommended approach (not yet confirmed by the user): keep raw SQL, do **not** rewrite to an ORM.
-1. **One connection layer in `db_core`**, selected by `DATABASE_URL` (`sqlite:///...` default, `postgresql://...` in deployment). It accepts the existing `?` placeholders and returns rows addressable by name and index, so most of the 244 statements stay unchanged. All 23 `sqlite3.connect` sites go through it.
-2. **One portable schema**: the scattered `CREATE TABLE` code (app.py `init_db`, four `migrations.py`) becomes ordered migration files that run on both databases. Dates stay ISO text for now to limit the change.
-3. **Rewrite only the dialect-specific statements**: `INSERT OR IGNORE` → `ON CONFLICT DO NOTHING` (valid in both), `INSERT OR REPLACE` → `ON CONFLICT DO UPDATE`, SQLite date functions → compute in Python and bind, `lastrowid` → `RETURNING`, `PRAGMA`/`sqlite_master` → the migration table, boolean `SUM` → `CASE WHEN`.
-4. **Tests run on both**: SQLite stays the fast local default; CI and `docker compose` run the same suite against a PostgreSQL container.
-5. **No data migration to AWS**: deployments start empty. A one-off local copy script only if the user wants their local data in a local PostgreSQL.
+How it works (`backend/dbapi.py`):
+- `dbapi.connect(path)` is the only way a database is opened (all 23 former `sqlite3.connect` sites call it). With `DATABASE_URL=postgresql://…` and `path` being the app's database it returns a `PgConnection`; any other path (tests' temp files) still gets plain SQLite.
+- `PgConnection`/`PgCursor` make psycopg 3 look like `sqlite3`: `?` placeholders (literal `%` escaped, `?` inside quotes left alone), rows readable by index and by name, `lastrowid` (via `lastval()`), `executescript`, `True/False` → `1/0`, `Decimal` → `float`.
+- Errors are re-raised as the `sqlite3` classes the code already catches (40 `except sqlite3.Error`, the duplicate-user `IntegrityError`), so no handler changed. A unique violation's message starts with "UNIQUE constraint failed".
+- **Each statement runs inside a savepoint**, so a failed statement doesn't abort the whole transaction (SQLite semantics; code such as `user_history` relies on carrying on after a missing-table error). The savepoints are issued as plain SQL: psycopg's `connection.transaction()` *commits* when used outside a transaction, which silently turned every statement into its own commit in the first version (§15 #80).
+- `CREATE TABLE` written for SQLite is translated: `INTEGER PRIMARY KEY [AUTOINCREMENT]` → identity column, `REAL` → `DOUBLE PRECISION` (PostgreSQL's `REAL` is 4 bytes, too coarse for money), `DEFAULT CURRENT_TIMESTAMP` → the same `YYYY-MM-DD HH:MM:SS` text SQLite produces. Dates and timestamps stay ISO text on both.
+- Helpers for the genuinely different bits: `table_exists`, `table_names`, `column_names`, `add_column_if_missing`, `is_postgres`.
 
-**Decided by the user (2026-10-04):** PostgreSQL runs on **RDS**; region **ap-south-1** (Mumbai). SQL over NoSQL was discussed and settled (relational, transactional data; JSONB for the few free-form fields). Still open: whether local development keeps SQLite as the default (current plan: yes, with the suite also run against PostgreSQL in compose/CI).
+Statements rewritten to portable SQL: `INSERT OR IGNORE` ×2 → `ON CONFLICT (…) DO NOTHING`; `INSERT OR REPLACE` → `ON CONFLICT (user_id) DO UPDATE`; `SUM(a >= b)` ×2 → `SUM(CASE WHEN … THEN 1 ELSE 0 END)`; `ROUND(SUM(…), 2)` → `ROUND(CAST(… AS NUMERIC), 2)`; `date('now')` ×2 → a bound parameter; `PRAGMA table_info` / `sqlite_master` → the helpers.
+
+What changes on PostgreSQL: the 17 foreign keys and all `CHECK` constraints are enforced (SQLite never enforced the foreign keys), and money columns are 8-byte floats on both.
+
+Verification: `unit_test/api_walkthrough.py` drives 75 API calls as one user (auth, profile, goals, budget, statement import + undo, delete month/all, loans + payments + metrics, credit report import + re-import + undo, score/what-if, portfolio, nudges, retirement, calculators). `unit_test/test_postgres.py` runs it on SQLite and on PostgreSQL and requires the transcripts to be **identical**: they are, with the same 21 tables on both. The compose stack (PostgreSQL container) passes the same black-box check as before and keeps its data across `down`/`up`.
+
+Run the PostgreSQL tests locally (they **empty the target database's `public` schema**):
+```bash
+docker start smartfin-pg || docker run -d --name smartfin-pg -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=smartfin -p 127.0.0.1:55432:5432 postgres:17-alpine
+set TEST_DATABASE_URL=postgresql://postgres:dev@127.0.0.1:55432/smartfin
+python -X utf8 -m pytest unit_test/test_postgres.py
+```
+
+Not done / known limits:
+- **No connection pool**: one PostgreSQL connection per request. Fine locally; on RDS (TLS handshake per request) add `psycopg_pool` before load matters.
+- The savepoint per statement costs two extra round trips per query.
+- The conn-based unit tests (statement import, credit report, budget data) still run on SQLite only; PostgreSQL coverage of those paths is through the walkthrough.
+- No copy of existing local data into PostgreSQL (deployments start empty by design).
+- Chat with Bedrock was not exercised on either database (no working key).
+
+**Decided by the user (2026-10-04):** PostgreSQL runs on **RDS**; region **ap-south-1** (Mumbai). SQL over NoSQL was discussed and settled (relational, transactional data; JSONB for the few free-form fields). Local development keeps SQLite as the default.
 
 **Environment variables the backend reads**
 | Variable | Meaning |
 |---|---|
-| `SMARTFIN_DATA_DIR` | Folder for `auth.db` and `uploads/`. Default: `backend/`. In the image: `/data` (a volume) |
+| `DATABASE_URL` | `postgresql://user:password@host:5432/db` to use PostgreSQL. Unset = SQLite file in the data folder |
+| `SMARTFIN_DATA_DIR` | Folder for `auth.db` (SQLite only) and `uploads/`. Default: `backend/`. In the image: `/data` (a volume) |
 | `SMARTFIN_ENV` | `production` makes the app refuse to start without a real `JWT_SECRET_KEY` (32+ chars, not the dev default) |
 | `JWT_SECRET_KEY` | Signs login tokens |
 | `SMARTFIN_CORS_ORIGINS` | Extra allowed origins, comma-separated. Not needed when site and API share an address |
@@ -895,7 +929,7 @@ Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BA
 
 **Rules**
 - The local `backend/auth.db` holds the user's real bank statement. It must never enter an image, the repo or AWS; deployments start with an empty database. `backend/.dockerignore` enforces this for images: keep it that way.
-- One backend replica only while on SQLite; with PostgreSQL and S3 uploads the backend can run 2+.
+- More than one backend replica needs PostgreSQL (done) **and** uploads on S3 (phase 4, not done): until then keep one replica.
 - Backend image is about 1 GB (pandas, scipy, scikit-learn, xgboost, yfinance). Fine for now; trim later if pulls are slow.
 
 ---
@@ -904,6 +938,7 @@ Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BA
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-04 | Claude Code (Opus 5.5) | PostgreSQL migration (deployment phase 3). New `backend/dbapi.py`: one `connect()`; with `DATABASE_URL` set, a psycopg 3 connection that behaves like `sqlite3` (placeholders, rows by name, `lastrowid`, sqlite3 exception classes, per-statement savepoints, DDL translation). All 23 connect sites use it; 8 SQLite-only statements rewritten. `unit_test/api_walkthrough.py` (75 API calls) gives identical transcripts on SQLite and PostgreSQL; `test_postgres.py` enforces that. Compose now runs a PostgreSQL container; stack re-verified. Fixed 404→500 handler. `psycopg[binary]==3.3.6` added. 157 tests (155 + 2 PostgreSQL-only that skip without `TEST_DATABASE_URL`; 10/10 with it). Earlier: phases 1–2 committed as `ab8ebae`; decisions RDS + ap-south-1. Not committed. §1, §3, §14 #29–#30, §15 #79–#82, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | Plan change, no code: the user decided to migrate to PostgreSQL. §17 re-ordered (migration and S3 uploads now come before Terraform/Ansible/Kubernetes) and the migration's scope measured (21 files, 23 connect sites, 244 statements, ~26 tables, 53 test files). Deployment phases 1–2 are still uncommitted |
 | 2026-10-04 | Claude Code (Opus 5.5) | Deployment phases 1–2 (§17). App made configurable (`SMARTFIN_DATA_DIR`, `SMARTFIN_ENV` + JWT secret check, `SMARTFIN_CORS_ORIGINS`, `SMARTFIN_LOG_FILE`, `/healthz`), hardcoded DB paths and frontend hosts removed, `backend/requirements.txt` pinned to what runs. Added `backend/Dockerfile` (test + runtime stages, non-root), `frontend/Dockerfile` + `nginx.conf.template` (serves the app, forwards API routes), `docker-compose.yml`, `.dockerignore` files, `unit_test/test_deployment.py`. 147 tests pass in the image; stack verified end to end on port 8088. Nothing created on AWS. Also committed the credit report import (`67c7e47`). §2, §3, §12, §15 #74–#78, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | The user's real CIBIL report failed to import: the PDF is image-only (4.8 MB, 20 characters of text), so no label fix can help; it needs OCR, which is not installed (no Tesseract, no OCR Python package; `pypdfium2` and `PIL` are present for rendering). Added `CreditReportNoTextError` with a plain message instead of "couldn't find any credit accounts", and `credit_report/describe_layout.py`: a CLI the user runs locally that prints a REDACTED layout skeleton (digits → 9, non-vocabulary words → x) or, for image PDFs, page/picture/text-object counts. Use it whenever a real report or its labels are needed; never ask for the report itself. 46 credit-report tests (145 total). OCR support is an open decision for the user |

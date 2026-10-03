@@ -9,6 +9,10 @@ Creates tables for:
 """
 
 import sqlite3
+try:
+    import dbapi
+except ImportError:  # imported as backend.<package> in some tests
+    from backend import dbapi
 from typing import Optional
 import logging
 
@@ -27,7 +31,7 @@ class RetirementPlanningMigrations:
             db_path: Path to SQLite database
         """
         try:
-            conn = sqlite3.connect(db_path)
+            conn = dbapi.connect(db_path)
             cursor = conn.cursor()
             
             # Create retirement_plans table
@@ -144,7 +148,7 @@ class RetirementPlanningMigrations:
             db_path: Path to SQLite database
         """
         try:
-            conn = sqlite3.connect(db_path)
+            conn = dbapi.connect(db_path)
             cursor = conn.cursor()
             
             cursor.execute('DROP TABLE IF EXISTS retirement_plan_history')
@@ -173,7 +177,7 @@ class RetirementPlanningMigrations:
             True if all tables exist, False otherwise
         """
         try:
-            conn = sqlite3.connect(db_path)
+            conn = dbapi.connect(db_path)
             cursor = conn.cursor()
             
             required_tables = [
@@ -183,8 +187,7 @@ class RetirementPlanningMigrations:
                 'retirement_plan_history'
             ]
             
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            existing_tables = [row[0] for row in cursor.fetchall()]
+            existing_tables = dbapi.table_names(conn)
             
             for table in required_tables:
                 if table not in existing_tables:

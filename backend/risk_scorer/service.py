@@ -64,7 +64,8 @@ def user_history(conn, user_id) -> dict:
         # Accounts that did are already counted through their loan_payments above.
         since_month = (date.today() - timedelta(days=HISTORY_WINDOW_DAYS)).strftime("%Y-%m")
         late, missed, months = conn.execute(
-            """SELECT COALESCE(SUM(h.dpd >= 30 AND h.dpd < 90), 0), COALESCE(SUM(h.dpd >= 90), 0), COUNT(*)
+            """SELECT COALESCE(SUM(CASE WHEN h.dpd >= 30 AND h.dpd < 90 THEN 1 ELSE 0 END), 0),
+                      COALESCE(SUM(CASE WHEN h.dpd >= 90 THEN 1 ELSE 0 END), 0), COUNT(*)
                FROM credit_account_history h JOIN credit_accounts a ON a.id = h.account_id
                WHERE a.user_id = ? AND a.loan_id IS NULL AND h.month >= ?""", (user_id, since_month)).fetchone()
         if months:

@@ -4,6 +4,7 @@ Provides comprehensive loan metrics for financial health scoring
 """
 
 import sqlite3
+import dbapi
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from collections import defaultdict
@@ -23,7 +24,7 @@ class LoanMetricsEngine:
     
     def _get_connection(self):
         """Get database connection"""
-        conn = sqlite3.connect(self.db_path)
+        conn = dbapi.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
     

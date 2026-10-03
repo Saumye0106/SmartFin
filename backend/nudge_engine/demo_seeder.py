@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import random
 import sqlite3
+import dbapi
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -69,7 +70,7 @@ def _week_start(weeks_ago: int) -> datetime:
 
 def seed(db_path: str, user_id: int, n_weeks: int = 16, clear_existing: bool = False):
     """Seed expense data for a user."""
-    conn = sqlite3.connect(db_path)
+    conn = dbapi.connect(db_path)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 

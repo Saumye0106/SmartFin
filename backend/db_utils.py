@@ -4,6 +4,7 @@ Provides helper functions for database operations and initialization
 """
 
 import sqlite3
+import dbapi
 import os
 from typing import Optional, List, Dict, Any, Tuple
 
@@ -45,7 +46,7 @@ def init_loan_tables(db_path: Optional[str] = None) -> None:
     if db_path is None:
         db_path = get_db_path()
     
-    conn = sqlite3.connect(db_path)
+    conn = dbapi.connect(db_path)
     cursor = conn.cursor()
     
     try:
@@ -128,7 +129,7 @@ def verify_loan_tables(db_path: Optional[str] = None) -> Dict[str, Any]:
     if db_path is None:
         db_path = get_db_path()
     
-    conn = sqlite3.connect(db_path)
+    conn = dbapi.connect(db_path)
     cursor = conn.cursor()
     
     results = {
@@ -141,16 +142,15 @@ def verify_loan_tables(db_path: Optional[str] = None) -> Dict[str, Any]:
     try:
         # Check tables
         for table in LOAN_TABLES:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
-            exists = cursor.fetchone() is not None
+            _safe_table_identifier(table)
+            exists = dbapi.table_exists(conn, table)
 
             if exists:
-                cursor.execute(f"PRAGMA table_info({_safe_table_identifier(table)})")
-                columns = cursor.fetchall()
+                columns = dbapi.column_names(conn, table)
                 results['tables'][table] = {
                     'exists': True,
                     'column_count': len(columns),
-                    'columns': [col[1] for col in columns]
+                    'columns': columns
                 }
             else:
                 results['tables'][table] = {'exists': False}
@@ -158,7 +158,10 @@ def verify_loan_tables(db_path: Optional[str] = None) -> Dict[str, Any]:
                 results['success'] = False
         
         # Check indexes
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_loan%'")
+        if dbapi.is_postgres(conn):
+            cursor.execute("SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND indexname LIKE 'idx_loan%'")
+        else:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_loan%'")
         indexes = cursor.fetchall()
         results['indexes'] = [idx[0] for idx in indexes]
         
@@ -196,7 +199,7 @@ def execute_loan_query(
     if db_path is None:
         db_path = get_db_path()
     
-    conn = sqlite3.connect(db_path)
+    conn = dbapi.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
@@ -238,7 +241,7 @@ def get_loan_table_stats(db_path: Optional[str] = None) -> Dict[str, int]:
     if db_path is None:
         db_path = get_db_path()
     
-    conn = sqlite3.connect(db_path)
+    conn = dbapi.connect(db_path)
     cursor = conn.cursor()
     
     stats = {}

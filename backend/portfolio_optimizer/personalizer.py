@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import dbapi
 from contextlib import closing
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -49,7 +50,7 @@ class Personalizer:
         self.db_path = db_path
 
     def _get_conn(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = dbapi.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -75,8 +76,8 @@ class Personalizer:
                 row = conn.execute(
                     "SELECT COALESCE(SUM(monthly_emi), 0) AS emi FROM loans "
                     "WHERE user_id = ? AND deleted_at IS NULL "
-                    "AND (loan_maturity_date IS NULL OR loan_maturity_date >= date('now'))",
-                    (user_id,),
+                    "AND (loan_maturity_date IS NULL OR loan_maturity_date >= ?)",
+                    (user_id, datetime.now().date().isoformat()),
                 ).fetchone()
                 return row["emi"] / budget["monthly_income"]
         except sqlite3.Error as e:
@@ -90,8 +91,8 @@ class Personalizer:
                 row = conn.execute(
                     "SELECT COUNT(*) AS cnt FROM loans "
                     "WHERE user_id = ? AND deleted_at IS NULL "
-                    "AND (loan_maturity_date IS NULL OR loan_maturity_date >= date('now'))",
-                    (user_id,),
+                    "AND (loan_maturity_date IS NULL OR loan_maturity_date >= ?)",
+                    (user_id, datetime.now().date().isoformat()),
                 ).fetchone()
                 return row["cnt"]
         except sqlite3.Error as e:

@@ -1,10 +1,11 @@
 """risk_profile: the few risk-model inputs SmartFin has nowhere else to keep (credit-card limit and balance)."""
 
 import sqlite3
+import dbapi
 
 
 def create_tables(db_path: str) -> None:
-    conn = sqlite3.connect(db_path)
+    conn = dbapi.connect(db_path)
     try:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS risk_profile (

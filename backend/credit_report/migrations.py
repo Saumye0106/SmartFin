@@ -1,10 +1,11 @@
 """Tables for imported credit reports. Created at startup; safe to run repeatedly."""
 
 import sqlite3
+import dbapi
 
 
 def create_tables(db_path: str) -> None:
-    conn = sqlite3.connect(db_path)
+    conn = dbapi.connect(db_path)
     try:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS credit_report_imports (

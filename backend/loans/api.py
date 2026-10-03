@@ -566,10 +566,17 @@ def get_loan_metrics(user_id):
 
         try:
             cur.execute('''
-                INSERT OR REPLACE INTO loan_metrics
+                INSERT INTO loan_metrics
                 (user_id, loan_diversity_score, payment_history_score, loan_maturity_score,
                  payment_statistics, loan_statistics, calculated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (user_id) DO UPDATE SET
+                    loan_diversity_score = excluded.loan_diversity_score,
+                    payment_history_score = excluded.payment_history_score,
+                    loan_maturity_score = excluded.loan_maturity_score,
+                    payment_statistics = excluded.payment_statistics,
+                    loan_statistics = excluded.loan_statistics,
+                    calculated_at = excluded.calculated_at
             ''', (
                 user_id,
                 loan_diversity_score,

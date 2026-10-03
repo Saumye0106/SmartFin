@@ -3,10 +3,25 @@
 #   set JWT_SECRET_KEY to a random string of 32+ characters, then:
 #   docker compose up --build        ->  http://localhost:8088
 #
-# Data (database + uploaded pictures) lives in the named volume smartfin-data and starts empty;
-# it is separate from backend/auth.db on this machine.
+# The database is PostgreSQL in its own container (volume smartfin-pgdata); uploaded pictures live in
+# the volume smartfin-data. Both start empty and are separate from backend/auth.db on this machine.
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: smartfin
+      POSTGRES_USER: smartfin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-smartfin-local-only}
+    volumes:
+      - smartfin-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smartfin -d smartfin"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -14,6 +29,7 @@ services:
     environment:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY to a random string of 32+ characters}
       SMARTFIN_ENV: production
+      DATABASE_URL: postgresql://smartfin:${POSTGRES_PASSWORD:-smartfin-local-only}@postgres:5432/smartfin
       # Optional integrations; the app works without them.
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
@@ -22,6 +38,9 @@ services:
       - smartfin-data:/data
     expose:
       - "5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -38,3 +57,4 @@ services:
 
 volumes:
   smartfin-data:
+  smartfin-pgdata:
