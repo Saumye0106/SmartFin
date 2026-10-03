@@ -1,0 +1,35 @@
+# Local test of the manifests on any cluster (for example k3s in Docker): the same base as AWS,
+# plus a throwaway PostgreSQL inside the cluster and locally built images.
+#
+#   kubectl apply -k infra/k8s/overlays/local
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: smartfin
+
+resources:
+  - ../../base
+  - postgres.yaml
+
+images:
+  - name: smartfin-backend
+    newName: smartfin-copy-backend
+    newTag: latest
+  - name: smartfin-frontend
+    newName: smartfin-copy-frontend
+    newTag: latest
+
+secretGenerator:
+  - name: smartfin-secrets
+    literals:
+      - DATABASE_URL=postgresql://smartfin:local-test-only@postgres:5432/smartfin
+      - JWT_SECRET_KEY=local-test-only-not-a-real-secret-0123456789abcdef
+
+patches:
+  # Images are loaded into the cluster by hand, never pulled.
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never

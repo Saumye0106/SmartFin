@@ -133,6 +133,20 @@ def test_nothing_is_saved_until_commit(pg):
     other.close()
 
 
+@needs_postgres
+def test_several_copies_can_start_at_once(pg, tmp_path):
+    """Four backend processes creating the schema at the same moment must all come up."""
+    pg.close()
+    env = {**os.environ, "DATABASE_URL": TEST_DATABASE_URL, "SMARTFIN_DATA_DIR": str(tmp_path), "SMARTFIN_LOG_FILE": "",
+           "PYTHONUTF8": "1", "SMARTFIN_ENV": "development"}
+    code = "import app; print('UP', app.app.test_client().get('/healthz').status_code)"
+    procs = [subprocess.Popen([sys.executable, "-c", code], cwd=BACKEND, env=env, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True) for _ in range(4)]
+    results = [p.communicate(timeout=300) for p in procs]
+    assert [p.returncode for p in procs] == [0, 0, 0, 0], " | ".join(err[-400:] for _, err in results)
+    assert all("UP 200" in out for out, _ in results)
+
+
 def _walkthrough(tmp_path, name, database_url):
     env = {**os.environ, "DATABASE_URL": database_url, "SMARTFIN_DATA_DIR": str(tmp_path / name), "SMARTFIN_LOG_FILE": "",
            "JWT_SECRET_KEY": "walkthrough-secret-0123456789abcdef0123", "PYTHONUTF8": "1", "SMARTFIN_ENV": "development"}

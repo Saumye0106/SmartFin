@@ -1,0 +1,224 @@
+# Sets up the EC2 server created by Terraform and deploys SmartFin on it.
+#
+#   cd infra/ansible
+#   ./from_terraform.sh                       # writes inventory.ini and vars.yml from the Terraform outputs
+#   ansible-playbook -i inventory.ini site.yml -e image_tag=<git commit>
+#
+# Safe to run again: every step checks the current state first.
+---
+- name: Prepare the server
+  hosts: node
+  become: true
+  gather_facts: true
+  vars_files:
+    - vars.yml
+  vars:
+    k3s_version: v1.33.5+k3s1
+    swap_size_mb: 2048
+    kubectl: /usr/local/bin/k3s kubectl
+
+  tasks:
+    # ── Base system ──────────────────────────────────────────────────────────
+    - name: Wait for cloud-init to finish (a fresh instance is still installing packages)
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+      failed_when: false
+
+    - name: Install base packages
+      ansible.builtin.apt:
+        name: [unattended-upgrades, fail2ban, curl, ca-certificates]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Turn on automatic security updates
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        mode: "0644"
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+
+    - name: Forbid SSH password logins (keys only)
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/60-smartfin.conf
+        mode: "0644"
+        content: |
+          PasswordAuthentication no
+          PermitRootLogin no
+      notify: Restart ssh
+
+    # A 2 GB server has little headroom for k3s plus two backend copies.
+    - name: Create a swap file
+      ansible.builtin.shell: |
+        set -e
+        fallocate -l {{ swap_size_mb }}M /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+      args:
+        creates: /swapfile
+
+    - name: Keep the swap file after a reboot
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        line: /swapfile none swap sw 0 0
+
+    - name: Install the AWS CLI
+      ansible.builtin.command: snap install aws-cli --classic
+      args:
+        creates: /snap/bin/aws
+
+    # ── Kubernetes (k3s) ─────────────────────────────────────────────────────
+    - name: Download the k3s installer
+      ansible.builtin.get_url:
+        url: https://get.k3s.io
+        dest: /usr/local/bin/k3s-install.sh
+        mode: "0755"
+
+    - name: Install k3s
+      ansible.builtin.command: /usr/local/bin/k3s-install.sh
+      environment:
+        INSTALL_K3S_VERSION: "{{ k3s_version }}"
+        # The certificate must be valid for the public address so kubectl works from a laptop.
+        # Secrets are encrypted in the cluster's datastore.
+        INSTALL_K3S_EXEC: >-
+          server --tls-san {{ node_public_ip }} --write-kubeconfig-mode 600 --secrets-encryption
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Wait for the node to be ready
+      ansible.builtin.command: "{{ kubectl }} wait --for=condition=Ready node --all --timeout=180s"
+      register: node_ready
+      retries: 10
+      delay: 6
+      until: node_ready.rc == 0
+      changed_when: false
+
+    - name: Create the namespace
+      ansible.builtin.shell: "{{ kubectl }} create namespace smartfin --dry-run=client -o yaml | {{ kubectl }} apply -f -"
+      register: namespace
+      changed_when: "'created' in namespace.stdout"
+
+    # ── Secrets: from SSM Parameter Store straight into the cluster ──────────
+    # The server reads them with its IAM role. They never touch the repository or the laptop.
+    - name: Read the app's secrets from Parameter Store
+      ansible.builtin.command: >-
+        aws ssm get-parameter --region {{ aws_region }} --with-decryption
+        --name {{ ssm_parameter_prefix }}{{ item }} --query Parameter.Value --output text
+      loop: [database_url, jwt_secret_key]
+      register: ssm_values
+      changed_when: false
+      no_log: true
+
+    - name: Create or update the Kubernetes secret
+      ansible.builtin.shell: |
+        set -e
+        {{ kubectl }} -n smartfin create secret generic smartfin-secrets \
+          --from-literal=DATABASE_URL="$DATABASE_URL" \
+          --from-literal=JWT_SECRET_KEY="$JWT_SECRET_KEY" \
+          --dry-run=client -o yaml | {{ kubectl }} apply -f -
+      environment:
+        DATABASE_URL: "{{ ssm_values.results[0].stdout }}"
+        JWT_SECRET_KEY: "{{ ssm_values.results[1].stdout }}"
+      register: app_secret
+      changed_when: "'unchanged' not in app_secret.stdout"
+      no_log: true
+
+    # ── Registry login: ECR passwords last 12 hours, so refresh on a timer ───
+    - name: Install the ECR login refresher
+      ansible.builtin.copy:
+        dest: /usr/local/bin/smartfin-ecr-login
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # Renews the image-pull credential the smartfin namespace uses for ECR.
+          set -eu
+          PASSWORD="$(/snap/bin/aws ecr get-login-password --region {{ aws_region }})"
+          /usr/local/bin/k3s kubectl -n smartfin create secret docker-registry ecr-pull \
+            --docker-server={{ ecr_registry }} --docker-username=AWS --docker-password="$PASSWORD" \
+            --dry-run=client -o yaml | /usr/local/bin/k3s kubectl apply -f -
+
+    - name: Install the refresher's systemd service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/smartfin-ecr-login.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Refresh the ECR pull secret for SmartFin
+          After=k3s.service
+          Wants=k3s.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/smartfin-ecr-login
+
+    - name: Install the refresher's timer (every 6 hours and at boot)
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/smartfin-ecr-login.timer
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Refresh the ECR pull secret for SmartFin every 6 hours
+
+          [Timer]
+          OnBootSec=2min
+          OnUnitActiveSec=6h
+          Persistent=true
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Enable the timer
+      ansible.builtin.systemd:
+        name: smartfin-ecr-login.timer
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Log in to ECR now
+      ansible.builtin.command: /usr/local/bin/smartfin-ecr-login
+      changed_when: true
+
+    # ── Deploy ───────────────────────────────────────────────────────────────
+    - name: Copy the Kubernetes manifests
+      ansible.builtin.copy:
+        src: ../k8s/
+        dest: /opt/smartfin/k8s/
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: Fill in this deployment's values (image names, region, bucket)
+      ansible.builtin.template:
+        src: templates/aws-kustomization.yaml.j2
+        dest: /opt/smartfin/k8s/overlays/aws/kustomization.yaml
+        mode: "0644"
+
+    - name: Apply the manifests
+      ansible.builtin.command: "{{ kubectl }} apply -k /opt/smartfin/k8s/overlays/aws"
+      register: applied
+      changed_when: "'configured' in applied.stdout or 'created' in applied.stdout"
+
+    - name: Wait for the new version to be running
+      ansible.builtin.command: "{{ kubectl }} -n smartfin rollout status deployment/{{ item }} --timeout=300s"
+      loop: [backend, frontend]
+      changed_when: false
+
+    - name: Check the site answers through the ingress
+      ansible.builtin.uri:
+        url: http://127.0.0.1/healthz
+        return_content: true
+      register: health
+      retries: 12
+      delay: 5
+      until: health.status == 200 and health.json.status == 'ok'
+
+    - name: Show where it is running
+      ansible.builtin.debug:
+        msg: "SmartFin {{ image_tag }} is running at http://{{ node_public_ip }}"
+
+  handlers:
+    - name: Restart ssh
+      ansible.builtin.service:
+        name: ssh
+        state: restarted

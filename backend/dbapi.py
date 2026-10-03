@@ -298,6 +298,35 @@ def connect(path=None):
     return sqlite3.connect(path)
 
 
+class startup_lock:
+    """
+    Only one process at a time may create or alter tables.
+
+    With several backend copies starting together on PostgreSQL, two of them running
+    CREATE TABLE IF NOT EXISTS at the same instant can fail with a duplicate-object error.
+    This holds a PostgreSQL advisory lock (on its own connection) for the duration of the
+    block; the others wait, then find the tables already there. A no-op on SQLite.
+    """
+
+    _KEY = 7231001  # arbitrary, fixed number identifying "SmartFin schema setup"
+
+    def __enter__(self):
+        self._conn = None
+        if IS_POSTGRES:
+            import psycopg
+            self._conn = psycopg.connect(DATABASE_URL, connect_timeout=10, autocommit=True)
+            self._conn.execute("SELECT pg_advisory_lock(%s)", (self._KEY,))
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._conn is not None:
+            try:
+                self._conn.execute("SELECT pg_advisory_unlock(%s)", (self._KEY,))
+            finally:
+                self._conn.close()
+        return False
+
+
 def is_postgres(conn) -> bool:
     return isinstance(conn, PgConnection)
 

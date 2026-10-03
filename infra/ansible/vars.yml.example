@@ -1,0 +1,6 @@
+# from_terraform.sh writes the real vars.yml (git-ignored). This shows its shape.
+node_public_ip: "203.0.113.10"
+aws_region: "ap-south-1"
+ecr_registry: "123456789012.dkr.ecr.ap-south-1.amazonaws.com"
+uploads_bucket: "smartfin-uploads-abcd1234"
+ssm_parameter_prefix: "/smartfin/"

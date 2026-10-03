@@ -687,6 +687,9 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 30. **Unknown URLs used to return 500** (the catch-all error handler swallowed 404/405). Fixed 2026-10-04: HTTP errors keep their status. Also: the Nudge Engine has no `POST /api/nudges/scan`; the scan is `GET /api/nudges/` (§5 and §7 list it wrongly).
 31. **Request size limit.** `MAX_CONTENT_LENGTH` was 5 MB app-wide, so statement and credit report uploads between 5 and 15 MB were rejected by Flask before their own 15 MB check (the user's CIBIL PDF was 4.8 MB). Now 16 MB app-wide; profile pictures enforce 5 MB in their route.
 32. **On Windows an unclosed Flask test-client response keeps a served file locked**, so deleting or replacing that file fails. Close responses in tests that serve files.
+33. **Git Bash rewrites arguments that look like Unix paths** (`docker exec x cat /etc/...` became `C:/Program Files/Git/etc/...`). Prefix such commands with `MSYS_NO_PATHCONV=1`. An empty kubeconfig then made `kubectl` fall back to `localhost:8080`, which on this machine is the user's Jenkins: always check the kubeconfig is non-empty before using it.
+34. **Don't write Python or YAML containing `\n` escapes through a shell heredoc**: the escape was turned into a real newline twice this session (a Dockerfile line, a test). Use the Write/Edit tools.
+35. **Ansible runs in WSL** (ansible-core 2.15.13 is installed in the Ubuntu distro). The installed `community.general` 12.x does not support that core version, so the playbook uses only `ansible.builtin` modules. SSH keys on `/mnt/c` have permissions ssh refuses: copy the key into WSL and `chmod 600`.
 
 ---
 
@@ -881,8 +884,8 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 | 3 | **PostgreSQL migration** | ✅ 2026-10-04 (details below) |
 | 4 | Uploads (profile pictures) to S3, so more than one backend replica can run | ✅ 2026-10-04 in code (`file_storage.py`); tested with a stand-in S3 client, **not yet against a real bucket** |
 | 5 | Terraform (`infra/terraform/`): VPC with public + private subnets, security groups, EC2 node + Elastic IP, IAM role, ECR ×2, S3 uploads bucket, RDS PostgreSQL 17, secrets in SSM Parameter Store | 🟡 written; `fmt` + `validate` pass; **never planned or applied** (no usable credentials, see below) |
-| 6 | Ansible: install/harden k3s on the instance | ⬜ |
-| 7 | Kubernetes manifests: backend Deployment (**2 replicas**, no data volume, probes on `/healthz`), frontend Deployment, Services, Ingress, Secret with `DATABASE_URL` | ⬜ |
+| 6 | Ansible (`infra/ansible/site.yml`): base hardening, swap, k3s (pinned version, secrets encryption), secrets from SSM → Kubernetes Secret, ECR pull-secret refresh timer, apply manifests, wait for rollout, health check | 🟡 written; `--syntax-check` passes and the template renders; **never run against a server** |
+| 7 | Kubernetes manifests (`infra/k8s/`, kustomize: `base`, `overlays/local`, `overlays/aws`): backend ×2 and frontend ×2 Deployments, Services, Ingress (Traefik), PodDisruptionBudget, ConfigMap | ✅ 2026-10-04, **verified on a real k3s cluster in Docker** |
 | 8 | GitHub Actions: tests on SQLite **and** PostgreSQL → build → push to ECR → roll out | ⬜ (existing `deploy.yml` publishes the frontend to GitHub Pages) |
 | 9 | Operations: CloudWatch logs/alarms, database restore test, teardown script, HTTPS | ⬜ |
 
@@ -937,6 +940,12 @@ Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BA
 
 **Verified 2026-10-04 (local Docker):** 147 tests pass inside the Linux image; through `http://127.0.0.1:8088`: site, deep link, cached assets with no localhost address baked in, `/healthz`, GET vs POST on `/forgot-password`, register → login → `/api/predict` (risk model) → portfolio frontier (real data files present) → 401 without a token; data survives `docker compose down/up`; the backend runs as a non-root user; the image contains no `auth.db`, `.env`, key file or logs.
 
+**Kubernetes verification (2026-10-04, k3s v1.33.5 in a Docker container, local overlay with an in-cluster PostgreSQL):** all Deployments rolled out; the black-box check passed through the Traefik ingress (site, deep links, auth, risk score, portfolio, 401 without a token); backend pods run as uid 10001 with a read-only root filesystem; a full rolling restart of the backend served 362/362 requests with no failure; the Ansible-rendered AWS overlay was accepted by the API server (`--dry-run=server`). How to repeat: `docker run -d --privileged --name k3s-test -p 127.0.0.1:8089:80 -p 127.0.0.1:6444:6443 rancher/k3s:v1.33.5-k3s1 server --tls-san 127.0.0.1`, copy `/etc/rancher/k3s/k3s.yaml` out (port 6443 → 6444), `docker save <image> | docker exec -i k3s-test ctr -n k8s.io images import -`, `kubectl apply -k infra/k8s/overlays/local`.
+
+**Several backend copies starting together** used to fail on PostgreSQL (two processes running `CREATE TABLE IF NOT EXISTS` at once → duplicate-object error). `dbapi.startup_lock()` (a PostgreSQL advisory lock around `init_db()`) fixes it; `test_several_copies_can_start_at_once` fails without it.
+
+**Still to do:** get SmartFin AWS credentials → `terraform plan`/`apply` → push images → run the playbook (first real run of both) → phase 8 CI/CD → phase 9 (HTTPS, logs/alarms, restore test, connection pool).
+
 **Rules**
 - The local `backend/auth.db` holds the user's real bank statement. It must never enter an image, the repo or AWS; deployments start with an empty database. `backend/.dockerignore` enforces this for images: keep it that way.
 - More than one backend replica needs PostgreSQL (done) **and** uploads on S3 (phase 4, not done): until then keep one replica.
@@ -948,6 +957,7 @@ Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BA
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-04 | Claude Code (Opus 5.5) | Deployment phases 6–7. `infra/k8s/` kustomize manifests verified on a real k3s cluster in Docker (end-to-end check through the ingress, non-root + read-only pods, zero failed requests across a rolling restart). `infra/ansible/site.yml` + template + `from_terraform.sh` (syntax-checked, never run on a server). `dbapi.startup_lock()` so several backend copies can start together on PostgreSQL (test proves the race without it). `infra/README.md` gained the deploy steps. Phase 4 + Terraform committed as `184430c`. §14 #33–#35, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | Deployment phase 4 + Terraform. `backend/file_storage.py`: profile pictures in S3 when `SMARTFIN_UPLOADS_BUCKET` is set (private bucket, still served through the backend; names validated), folder otherwise; request size limit raised to 16 MB with a 5 MB picture cap; 12 tests. `infra/terraform/` written for ap-south-1 (VPC, EC2 + EIP, IAM role, ECR, S3, RDS PostgreSQL 17, SSM secrets) with `infra/README.md`; `terraform fmt`/`validate` pass. **Not planned or applied**: the machine's AWS credentials belong to another project and lack the permissions. PostgreSQL migration committed as `ed8bad0`. §3, §14 #31–#32, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | PostgreSQL migration (deployment phase 3). New `backend/dbapi.py`: one `connect()`; with `DATABASE_URL` set, a psycopg 3 connection that behaves like `sqlite3` (placeholders, rows by name, `lastrowid`, sqlite3 exception classes, per-statement savepoints, DDL translation). All 23 connect sites use it; 8 SQLite-only statements rewritten. `unit_test/api_walkthrough.py` (75 API calls) gives identical transcripts on SQLite and PostgreSQL; `test_postgres.py` enforces that. Compose now runs a PostgreSQL container; stack re-verified. Fixed 404→500 handler. `psycopg[binary]==3.3.6` added. 157 tests (155 + 2 PostgreSQL-only that skip without `TEST_DATABASE_URL`; 10/10 with it). Earlier: phases 1–2 committed as `ab8ebae`; decisions RDS + ap-south-1. Not committed. §1, §3, §14 #29–#30, §15 #79–#82, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | Plan change, no code: the user decided to migrate to PostgreSQL. §17 re-ordered (migration and S3 uploads now come before Terraform/Ansible/Kubernetes) and the migration's scope measured (21 files, 23 connect sites, 244 statements, ~26 tables, 53 test files). Deployment phases 1–2 are still uncommitted |

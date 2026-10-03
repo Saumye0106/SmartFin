@@ -58,6 +58,40 @@ terraform apply     # creates it; billing starts
 
 RDS takes 5 to 10 minutes. The outputs list the server address, the ECR repositories and the bucket name.
 
+## Deploy the app
+
+Three steps: push the images, then let Ansible set up the server and roll the app out.
+Ansible does not run on Windows itself, so run the last step inside WSL (Ubuntu).
+
+```
+# 1. Build and push both images, tagged with the current commit (Git Bash or PowerShell, Docker running)
+cd infra/terraform
+REGISTRY=$(terraform output -raw ecr_registry)
+TAG=$(git rev-parse --short HEAD)
+aws ecr get-login-password --region ap-south-1 --profile smartfin | docker login --username AWS --password-stdin $REGISTRY
+docker build -t $REGISTRY/smartfin-backend:$TAG  ../../backend  && docker push $REGISTRY/smartfin-backend:$TAG
+docker build -t $REGISTRY/smartfin-frontend:$TAG ../../frontend && docker push $REGISTRY/smartfin-frontend:$TAG
+
+# 2. In WSL: copy the SSH key into WSL once (keys on the Windows drive have permissions ssh refuses)
+mkdir -p ~/.ssh && cp /mnt/c/Users/<you>/.ssh/smartfin ~/.ssh/smartfin && chmod 600 ~/.ssh/smartfin
+
+# 3. In WSL: set up the server and deploy
+cd /mnt/c/Users/<you>/smartfin-copy/smartfin-copy/infra/ansible
+TERRAFORM=terraform.exe ./from_terraform.sh ~/.ssh/smartfin
+ansible-playbook -i inventory.ini site.yml -e image_tag=<the TAG from step 1>
+```
+
+The playbook installs k3s, copies the app's secrets from Parameter Store into the cluster, sets up the ECR
+login refresh, applies the manifests in `infra/k8s`, waits for the rollout and checks the site answers.
+Run it again with a new `image_tag` to deploy a new version; the rollout replaces one copy at a time.
+
+To try the same manifests on your own machine first, without AWS:
+`kubectl apply -k infra/k8s/overlays/local` on any local cluster that has the two images loaded.
+
+What has and hasn't been run: the Docker images, the PostgreSQL support and the Kubernetes manifests were
+tested locally on a real k3s cluster. Terraform passes `validate` and the playbook passes Ansible's syntax
+check, but neither has been run against AWS yet. Expect to fix small things on the first real run.
+
 ## Destroy
 
 ```

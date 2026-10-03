@@ -1,0 +1,32 @@
+# Written by Ansible from infra/k8s/overlays/aws/kustomization.yaml. Do not edit on the server.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: smartfin
+
+resources:
+  - ../../base
+
+images:
+  - name: smartfin-backend
+    newName: {{ ecr_registry }}/smartfin-backend
+    newTag: "{{ image_tag }}"
+  - name: smartfin-frontend
+    newName: {{ ecr_registry }}/smartfin-frontend
+    newTag: "{{ image_tag }}"
+
+configMapGenerator:
+  - name: backend-config
+    behavior: merge
+    literals:
+      - AWS_REGION={{ aws_region }}
+      - SMARTFIN_UPLOADS_BUCKET={{ uploads_bucket }}
+
+patches:
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: add
+        path: /spec/template/spec/imagePullSecrets
+        value:
+          - name: ecr-pull

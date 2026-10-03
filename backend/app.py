@@ -389,8 +389,9 @@ def init_db():
     create_risk_scorer_tables(DB_PATH)
     create_credit_report_tables(DB_PATH)
 
-# Initialize database
-init_db()
+# Initialize database (one process at a time: several copies may start together)
+with dbapi.startup_lock():
+    init_db()
 
 # ==================== REGISTER BLUEPRINTS ====================
 app.register_blueprint(retirement_bp)

@@ -1,0 +1,36 @@
+# The AWS deployment. Ansible fills in the two image names and the bucket and region
+# (see infra/ansible), then runs:  kubectl apply -k infra/k8s/overlays/aws
+#
+# The Secret smartfin-secrets (DATABASE_URL, JWT_SECRET_KEY) and the registry credential
+# ecr-pull are created on the server from SSM Parameter Store and ECR; they are never in this repository.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: smartfin
+
+resources:
+  - ../../base
+
+images:
+  - name: smartfin-backend
+    newName: ACCOUNT.dkr.ecr.REGION.amazonaws.com/smartfin-backend
+    newTag: REPLACED_BY_DEPLOY
+  - name: smartfin-frontend
+    newName: ACCOUNT.dkr.ecr.REGION.amazonaws.com/smartfin-frontend
+    newTag: REPLACED_BY_DEPLOY
+
+configMapGenerator:
+  - name: backend-config
+    behavior: merge
+    literals:
+      - AWS_REGION=REGION
+      - SMARTFIN_UPLOADS_BUCKET=BUCKET
+
+patches:
+  - target:
+      kind: Deployment
+    patch: |-
+      - op: add
+        path: /spec/template/spec/imagePullSecrets
+        value:
+          - name: ecr-pull
