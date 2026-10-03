@@ -41,6 +41,13 @@ npm run build
 START_SMARTFIN.bat     # from workspace root — spawns both terminals + browser
 ```
 
+```bash
+# Whole app in containers (same images that get deployed); needs Docker Desktop running
+set JWT_SECRET_KEY=<random 32+ chars>      # PowerShell: $env:JWT_SECRET_KEY = "..."
+docker compose up --build                  # http://localhost:8088 (empty database in a Docker volume)
+docker build --target test backend         # runs the test suite inside the Linux image
+```
+
 > **Important:** Flask and all backend packages are installed in the user site-packages: `C:\Users\saumy\AppData\Roaming\Python\Python314\site-packages`. Do NOT activate `.venv` — it is broken.
 
 ### Installed Backend Packages (Python 3.14)
@@ -49,7 +56,7 @@ START_SMARTFIN.bat     # from workspace root — spawns both terminals + browser
 - `numpy`, `pandas`, `joblib`, `boto3`, `twilio`, `requests`, `python-dotenv`
 - `yfinance` (Portfolio Optimizer real data), `pytest==8.3.4` (installed 2026-09-30; was in requirements.txt but missing)
 - `pdfplumber`, `openpyxl`, `xlrd` (statement import: PDF / XLSX / XLS). `reportlab` is dev-only, used by `unit_test/fixtures/statements/make_fixtures.py` to generate sample PDFs; not in requirements.txt.
-- `marshmallow` **4.3.1** is installed even though requirements.txt used to pin 3.23.2. The pin is now `>=3.23.2,<5` and validators are written to work on both (see §15 #27). Installed versions generally drift ahead of `requirements.txt` (e.g. scikit-learn 1.9.1 vs pinned 1.8.0), so check `pip show <pkg>` before assuming the pinned version is what runs.
+- `backend/requirements.txt` is now **pinned to the versions that actually run** (Python 3.14, Flask 3.1.3, scikit-learn 1.9.1, xgboost 3.4.1 / `xgboost-cpu` on Linux, pandas 3.0.6, numpy 2.5.2, marshmallow 4.3.1 …); test tooling is in `requirements-dev.txt`. The root `requirements.txt` and `backend/runtime.txt` (python-3.11.9) are older leftovers and are not used by the Docker build.
 
 ---
 
@@ -149,6 +156,9 @@ smartfin-copy/
 │   │   ├── CreditReportImport.jsx      ← Import dialog on the Loans page (portal on <body>): upload → password → preview/edit → import → undo
 │   │   └── ...                         ← All other existing components UNTOUCHED
 │   └── services/api.js                 ← Axios client — has generic api.get() / api.post()
+├── docker-compose.yml                  ← backend + frontend containers for local runs (port 8088, named volume for data)
+├── backend/Dockerfile, .dockerignore   ← python:3.14-slim; stages base → test (pytest in-image) → runtime (non-root, /data volume, waitress)
+├── frontend/Dockerfile                 ← node build → nginx; nginx.conf.template forwards API paths to ${BACKEND_URL}
 ├── STANDALONE_APP_IDEAS.md             ← Saved ideas for separate apps (EMI decoder, scam checker, …)
 ├── .gitattributes                      ← Marks pdf/xlsx/xls/pkl/images binary (autocrlf=true would corrupt them)
 ├── AGENTS.md                           ← ← THIS FILE — update after every change
@@ -591,6 +601,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
   5. [ ] **Financial Digital Twin** — safe-to-spend, goal-success probability (Monte Carlo on the user's own history), personal inflation, what-if sliders (see Feature ideas backlog #1–#2).
   6. [ ] **Account Aggregator sandbox** (Setu) — consent flow; the production path (real AA access needs a regulated FIU).
   - Rules: parse in memory, never store files or passwords; always preview before saving; no claimed ML accuracy — categorization is rules + learned user corrections; train a classifier only once real corrections exist.
+- [ ] **DEPLOYMENT to AWS (started 2026-10-04, see §17).** Phases 1–2 done (app configurable, containerized, verified locally). Next: Terraform → Ansible (k3s) → Kubernetes manifests → CI/CD → operations. **Nothing has been created on AWS; applying Terraform costs money and needs the user's go-ahead.**
 - [ ] **Deferred by user (2026-10-02, "I'll come back to this"):** the Portfolio Optimizer's XGBoost return predictor has R² −0.47 and 0% influence, so it currently adds nothing. Plan: (1) replace it with a next-month **volatility** predictor (volatility clustering is genuinely predictable; it feeds the covariance, so ML would actually move allocations); (2) add a **walk-forward backtest** (rebuild yearly on past-only data; compare return/vol/max drawdown vs all-Nifty and 60/40), run with and without the vol model.
 - [ ] **NEXT:** audit the Nudge Engine the way the Portfolio Optimizer was audited — does it run on real user data or demo-seeded spikes, does the Isolation Forest result hold up, is anything fabricated or silently broken?
 - [ ] Replace `MainDashboard.jsx` health score widget with Portfolio Summary card (optional)
@@ -824,12 +835,77 @@ Privacy answer given to the user (2026-10-03): statement files and PDF passwords
 
 Also this session: 5 commits on `main` (statement-import fixes, risk model, budget data management, remount fix, docs); deleted `backend/backend.log` and a 167 MB `backend.log` at the repo root that held the Bedrock key and a full pdfminer trace of the user's statement. **The user still has to rotate the Bedrock key.**
 
+### Session 2026-10-04 (cont.) — deployment, phases 1–2 (`main`, uncommitted)
+
+| # | Problem | Root cause | Fix | How it was caught |
+|---|---|---|---|---|
+| 74 | The database path was hardcoded in six places relative to `backend/` | Each module computed its own `auth.db` path | One `SMARTFIN_DATA_DIR` in `db_core` (`DATA_DIR`, `DB_PATH`, `UPLOAD_DIR`); the other five sites import it | grep for `auth.db` before containerizing |
+| 75 | `/forgot-password` and `/verify-email` are both React pages and backend POST routes | Auth routes live at the top level, not under `/api` | nginx forwards those two by method (non-GET → backend) and the other top-level routes by an exact list; `test_deployment.py` fails if a backend route is missing from the list | Compared Flask's `url_map` with the React routes |
+| 76 | Reloading a deep link (`/profile/edit`) would 404 its scripts | Vite `base: './'` (for GitHub Pages) makes asset paths relative | `VITE_BASE=/` in the container build; default unchanged | Reasoned from the config, then checked the built `index.html` in the container |
+| 77 | Three components called `http://127.0.0.1:5000` directly | Bypassed `API_BASE_URL` | Export `API_BASE_URL` from `api.js` and use it; `??` instead of `||` so an empty value means "same address" | grep for hardcoded hosts |
+| 78 | Port 8080 on this machine is taken by another program on `[::1]` | — | Compose publishes 8088; test with `127.0.0.1`, not `localhost` | `netstat` before starting the stack |
+
+---
+
+## 17. Deployment (AWS) — plan and status
+
+**Decisions (user, 2026-10-04):** Kubernetes on EC2 using **k3s** (not EKS: about $20–40/month instead of $130–160, and Ansible gets a real job); chosen to learn/show the tools, not because the app needs it. ~~SQLite on a persistent volume, one backend replica~~ → **changed the same day: "we will migrate to postgres, so plan accordingly"**. PostgreSQL is now part of the deployment and comes **before** Terraform/Kubernetes, because it changes what gets provisioned. No custom domain yet.
+
+**Tools on the user's machine:** Docker Desktop 29.5 (must be started), `kubectl`, Terraform, AWS CLI with working credentials, WSL Ubuntu (for Ansible; not installed yet). No helm/k3d/kind.
+
+| Phase | What | Status |
+|---|---|---|
+| 1 | App configurable from the environment | ✅ 2026-10-04 |
+| 2 | Docker images + compose, tests inside the image | ✅ 2026-10-04 (SQLite; compose gets a `postgres` service in phase 3) |
+| 3 | **PostgreSQL migration** (sub-steps below) | ⬜ next |
+| 4 | Uploads (profile pictures) to S3, so more than one backend replica can run | ⬜ |
+| 5 | Terraform: VPC, EC2, security groups, ECR, **RDS PostgreSQL** (or none if Postgres runs in-cluster), S3 (uploads, backups, Terraform state), IAM role (Bedrock, ECR pull, S3), secrets | ⬜ |
+| 6 | Ansible: install/harden k3s on the instance | ⬜ |
+| 7 | Kubernetes manifests: backend Deployment (**2 replicas**, no data volume, probes on `/healthz`), frontend Deployment, Services, Ingress, Secret with `DATABASE_URL` | ⬜ |
+| 8 | GitHub Actions: tests on SQLite **and** PostgreSQL → build → push to ECR → roll out | ⬜ (existing `deploy.yml` publishes the frontend to GitHub Pages) |
+| 9 | Operations: CloudWatch logs/alarms, database restore test, teardown script, HTTPS | ⬜ |
+
+**PostgreSQL migration — measured scope (2026-10-04):** 21 backend files import `sqlite3`, 23 `sqlite3.connect` sites, 244 SQL statements, ~26 tables, and 53 test files that open SQLite directly. Dialect-specific spots: 25 `strftime`/`date('now')`/`datetime('now')`, 12 `row_factory`, 6 `substr(`, 5 `lastrowid`, 3 `INSERT OR IGNORE/REPLACE`, 3 `PRAGMA`, 3 `sqlite_master`, 2 `AUTOINCREMENT`, 2 `executescript`, 2 boolean `SUM(x >= ?)`, 2 `ALTER TABLE`.
+
+Recommended approach (not yet confirmed by the user): keep raw SQL, do **not** rewrite to an ORM.
+1. **One connection layer in `db_core`**, selected by `DATABASE_URL` (`sqlite:///...` default, `postgresql://...` in deployment). It accepts the existing `?` placeholders and returns rows addressable by name and index, so most of the 244 statements stay unchanged. All 23 `sqlite3.connect` sites go through it.
+2. **One portable schema**: the scattered `CREATE TABLE` code (app.py `init_db`, four `migrations.py`) becomes ordered migration files that run on both databases. Dates stay ISO text for now to limit the change.
+3. **Rewrite only the dialect-specific statements**: `INSERT OR IGNORE` → `ON CONFLICT DO NOTHING` (valid in both), `INSERT OR REPLACE` → `ON CONFLICT DO UPDATE`, SQLite date functions → compute in Python and bind, `lastrowid` → `RETURNING`, `PRAGMA`/`sqlite_master` → the migration table, boolean `SUM` → `CASE WHEN`.
+4. **Tests run on both**: SQLite stays the fast local default; CI and `docker compose` run the same suite against a PostgreSQL container.
+5. **No data migration to AWS**: deployments start empty. A one-off local copy script only if the user wants their local data in a local PostgreSQL.
+
+**Decided by the user (2026-10-04):** PostgreSQL runs on **RDS**; region **ap-south-1** (Mumbai). SQL over NoSQL was discussed and settled (relational, transactional data; JSONB for the few free-form fields). Still open: whether local development keeps SQLite as the default (current plan: yes, with the suite also run against PostgreSQL in compose/CI).
+
+**Environment variables the backend reads**
+| Variable | Meaning |
+|---|---|
+| `SMARTFIN_DATA_DIR` | Folder for `auth.db` and `uploads/`. Default: `backend/`. In the image: `/data` (a volume) |
+| `SMARTFIN_ENV` | `production` makes the app refuse to start without a real `JWT_SECRET_KEY` (32+ chars, not the dev default) |
+| `JWT_SECRET_KEY` | Signs login tokens |
+| `SMARTFIN_CORS_ORIGINS` | Extra allowed origins, comma-separated. Not needed when site and API share an address |
+| `SMARTFIN_LOG_FILE` | Log file path; empty = stdout only (containers). Default `backend.log` |
+| `SMARTFIN_LOG_LEVEL` | Default `INFO` |
+| `AWS_REGION`, `AWS_BEARER_TOKEN_BEDROCK`, `BEDROCK_MODEL_ID`, `SMARTFIN_AI_GUIDANCE_ENABLED`, `TWILIO_*` | Optional integrations |
+
+Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BASE` (`/` in the container). Frontend run-time: `BACKEND_URL` (nginx upstream).
+
+**How requests flow in the containers:** browser → frontend nginx (port 80) → static files, or → backend:5000 for `/api/*`, `/uploads/*`, the top-level auth routes and `/healthz`. The backend is never exposed directly. In Kubernetes the Ingress will point only at the frontend Service.
+
+**Verified 2026-10-04 (local Docker):** 147 tests pass inside the Linux image; through `http://127.0.0.1:8088`: site, deep link, cached assets with no localhost address baked in, `/healthz`, GET vs POST on `/forgot-password`, register → login → `/api/predict` (risk model) → portfolio frontier (real data files present) → 401 without a token; data survives `docker compose down/up`; the backend runs as a non-root user; the image contains no `auth.db`, `.env`, key file or logs.
+
+**Rules**
+- The local `backend/auth.db` holds the user's real bank statement. It must never enter an image, the repo or AWS; deployments start with an empty database. `backend/.dockerignore` enforces this for images: keep it that way.
+- One backend replica only while on SQLite; with PostgreSQL and S3 uploads the backend can run 2+.
+- Backend image is about 1 GB (pandas, scipy, scikit-learn, xgboost, yfinance). Fine for now; trim later if pulls are slow.
+
 ---
 
 ## 16. Change Log (most recent first)
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-04 | Claude Code (Opus 5.5) | Plan change, no code: the user decided to migrate to PostgreSQL. §17 re-ordered (migration and S3 uploads now come before Terraform/Ansible/Kubernetes) and the migration's scope measured (21 files, 23 connect sites, 244 statements, ~26 tables, 53 test files). Deployment phases 1–2 are still uncommitted |
+| 2026-10-04 | Claude Code (Opus 5.5) | Deployment phases 1–2 (§17). App made configurable (`SMARTFIN_DATA_DIR`, `SMARTFIN_ENV` + JWT secret check, `SMARTFIN_CORS_ORIGINS`, `SMARTFIN_LOG_FILE`, `/healthz`), hardcoded DB paths and frontend hosts removed, `backend/requirements.txt` pinned to what runs. Added `backend/Dockerfile` (test + runtime stages, non-root), `frontend/Dockerfile` + `nginx.conf.template` (serves the app, forwards API routes), `docker-compose.yml`, `.dockerignore` files, `unit_test/test_deployment.py`. 147 tests pass in the image; stack verified end to end on port 8088. Nothing created on AWS. Also committed the credit report import (`67c7e47`). §2, §3, §12, §15 #74–#78, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | The user's real CIBIL report failed to import: the PDF is image-only (4.8 MB, 20 characters of text), so no label fix can help; it needs OCR, which is not installed (no Tesseract, no OCR Python package; `pypdfium2` and `PIL` are present for rendering). Added `CreditReportNoTextError` with a plain message instead of "couldn't find any credit accounts", and `credit_report/describe_layout.py`: a CLI the user runs locally that prints a REDACTED layout skeleton (digits → 9, non-vocabulary words → x) or, for image PDFs, page/picture/text-object counts. Use it whenever a real report or its labels are needed; never ask for the report itself. 46 credit-report tests (145 total). OCR support is an open decision for the user |
 | 2026-10-04 | Claude Code (Opus 5.5) | Credit report import (roadmap Phase 3, loans half). `backend/credit_report/` (parser, service, api, migrations), `CreditReportImport.jsx` + button on the Loans page, 4 client calls in `api.js`, `risk_scorer.user_history` extended to count imported account history. Password-protected PDFs, preview with editable EMI/tenure/rate, server-side re-validation, re-import updates, undo restores previous card details. 44 new tests (143 pass) on generated SAMPLE reports in two layouts; browser-verified on a DB copy (before: "not enough data"; after import: scored from 5 late + 1 missed + 28% utilization with nothing typed; undo clean; 0 console errors). Earlier in the session: committed all prior work in 5 commits, deleted the old logs. §3, §5, §6, §7, §12, §14 #27–#28, §15 #70–#73 |
 | 2026-10-04 | Claude Code (Opus 5.5) | Risk model finished: confidence levels (`good`/`limited`/`insufficient`, no score from age alone) across `/api/predict`, `/api/whatif` (shared `compare_scores`) and the chat tools; saved card details (`risk_profile`, `GET/PUT /api/risk-profile`, form pre-fill); `assess_user` from records and the retirement planner switched to it; deleted `financial_health_scorer.py`, its test and `data/` (old pickle, training script, dataset). Fixed a pre-existing remount bug (`ProtectedRoute` defined inside `AppContent`) that wiped the dashboard form after every analysis. 99 tests pass (10 new). Verified through the real app on a DB copy and in a browser: three score states, card save + reload, all 10 pages render, logged-out redirect intact, 0 page errors. §5, §7, §12, §14 #7 #25 #26, §15 #66–#69 |

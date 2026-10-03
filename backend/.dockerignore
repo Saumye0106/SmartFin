@@ -1,0 +1,21 @@
+# Nothing personal or secret may enter the image: it gets pushed to a registry.
+auth.db
+auth.db-*
+*.db
+.env
+.env.*
+*.log
+bedrock-long-term-api-key.csv
+*.csv.key
+uploads/
+layout.txt
+
+# Not needed at runtime
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.hypothesis/
+misc/
+risk_scorer/data/
+Dockerfile
+.dockerignore

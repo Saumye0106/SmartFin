@@ -13,7 +13,8 @@ LOAN_TABLES = ('loans', 'loan_payments', 'loan_metrics')
 
 def get_db_path() -> str:
     """Get the absolute path to the database file"""
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth.db')
+    from db_core import DB_PATH
+    return DB_PATH
 
 
 def _safe_table_identifier(table: str) -> str:

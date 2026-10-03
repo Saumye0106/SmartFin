@@ -1,7 +1,8 @@
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000';
-const AUTH_BASE_URL = import.meta.env.VITE_AUTH_BASE_URL || 'http://127.0.0.1:5000';
+// Set VITE_API_BASE_URL="" at build time when the API is served from the same address as the site.
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:5000';
+const AUTH_BASE_URL = import.meta.env.VITE_AUTH_BASE_URL ?? API_BASE_URL;
 
 // Set up axios interceptor to handle 401 errors
 axios.interceptors.response.use(

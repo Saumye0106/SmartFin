@@ -20,8 +20,11 @@ from .models import RetirementPlan, RetirementScenario, ActionPlanItem
 
 logger = logging.getLogger(__name__)
 
-# Compute absolute path to auth.db in the backend directory
-_DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'auth.db')
+# The app's database (location set by SMARTFIN_DATA_DIR, see db_core)
+try:
+    from db_core import DB_PATH as _DEFAULT_DB_PATH
+except ImportError:  # imported as backend.retirement_planning in some tests
+    _DEFAULT_DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'auth.db')
 
 
 class BaseRepository:

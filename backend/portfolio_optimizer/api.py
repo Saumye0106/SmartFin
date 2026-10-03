@@ -247,6 +247,6 @@ def whatif():
 
 
 def _db_path() -> str:
-    """Resolve the auth.db path relative to backend/."""
-    here = Path(__file__).parent.parent  # backend/
-    return str(here / "auth.db")
+    """The app's database (location set by SMARTFIN_DATA_DIR, see db_core)."""
+    from db_core import DB_PATH
+    return DB_PATH

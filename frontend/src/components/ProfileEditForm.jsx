@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
+import api, { API_BASE_URL } from '../services/api';
 import './ProfileEditForm.css';
 
 // Phone Update Component
@@ -400,7 +400,7 @@ function ProfileEditForm() {
                 
                 {currentPictureUrl ? (
                   <img 
-                    src={`http://127.0.0.1:5000${currentPictureUrl}`}
+                    src={`${API_BASE_URL}${currentPictureUrl}`}
                     alt="Profile"
                     className="w-24 h-24 mx-auto rounded-full object-cover border-4 border-cyan-500/20"
                   />

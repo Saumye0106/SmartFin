@@ -1,0 +1,4 @@
+# Test and fixture tooling; not installed in the runtime image.
+-r requirements.txt
+pytest==8.3.4
+reportlab==5.0.1

@@ -35,14 +35,19 @@ console_handler.setLevel(LOG_LEVEL)
 console_handler.setFormatter(logging.Formatter(log_format))
 
 # File handler with immediate flushing
-file_handler = logging.FileHandler('backend.log', mode='a')
-file_handler.setLevel(LOG_LEVEL)
-file_handler.setFormatter(logging.Formatter(log_format))
+# Log file: backend.log by default; set SMARTFIN_LOG_FILE= (empty) in containers, where stdout is collected instead.
+LOG_FILE = os.environ.get('SMARTFIN_LOG_FILE', 'backend.log')
+log_handlers = [console_handler]
+if LOG_FILE:
+    file_handler = logging.FileHandler(LOG_FILE, mode='a')
+    file_handler.setLevel(LOG_LEVEL)
+    file_handler.setFormatter(logging.Formatter(log_format))
+    log_handlers.append(file_handler)
 
 # Configure root logger
 logging.basicConfig(
     level=LOG_LEVEL,
-    handlers=[console_handler, file_handler],
+    handlers=log_handlers,
     force=True
 )
 for _name in NOISY_LOGGERS:
@@ -98,25 +103,45 @@ from credit_report.api import credit_report_bp
 from credit_report.migrations import create_tables as create_credit_report_tables
 from legacy_scorer.model import model_data, model_metadata
 
-from db_core import DB_PATH, get_db, close_connection, execute_query, row_to_dict, rows_to_list
+from db_core import DB_PATH, UPLOAD_DIR, get_db, close_connection, execute_query, row_to_dict, rows_to_list
 
 app = Flask(__name__)
-app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'smartfin-secret-key-change-in-production')
+IS_PRODUCTION = os.environ.get('SMARTFIN_ENV', 'development').lower() == 'production'
+_DEV_JWT_SECRET = 'smartfin-secret-key-change-in-production'
+app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', _DEV_JWT_SECRET)
+if IS_PRODUCTION and (app.config['JWT_SECRET_KEY'] == _DEV_JWT_SECRET or len(app.config['JWT_SECRET_KEY']) < 32):
+    # Anyone who knows the default could forge a login for any user.
+    raise RuntimeError('SMARTFIN_ENV=production requires JWT_SECRET_KEY to be set to a random value of 32+ characters')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=1)
 app.config['JWT_REFRESH_TOKEN_EXPIRES'] = timedelta(days=30)
 
 # File upload configuration
-app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'profile_pictures')
+app.config['UPLOAD_FOLDER'] = UPLOAD_DIR
 app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB max file size
 app.config['ALLOWED_EXTENSIONS'] = {'jpg', 'jpeg', 'png', 'webp'}
 
 jwt = JWTManager(app)
 
+# Extra allowed origins for a deployment: SMARTFIN_CORS_ORIGINS=https://a.example,https://b.example
+# (not needed when the frontend and API are served from the same address).
+CORS_ORIGINS = ["https://saumye0106.github.io", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:3000"]
+CORS_ORIGINS += [o.strip() for o in os.environ.get('SMARTFIN_CORS_ORIGINS', '').split(',') if o.strip()]
+
 CORS(app, 
-     origins=["https://saumye0106.github.io", "http://localhost:5173", "http://localhost:5174", "http://localhost:5175", "http://localhost:3000"],
+     origins=CORS_ORIGINS,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Content-Type", "Authorization"],
      supports_credentials=True)
+
+@app.route('/healthz')
+def healthz():
+    """Liveness/readiness probe: the process is up and the database opens."""
+    try:
+        get_db().execute('SELECT 1')
+    except Exception as e:
+        return jsonify({'status': 'unhealthy', 'error': str(e)}), 503
+    return jsonify({'status': 'ok'})
+
 
 # Handle CORS preflight requests
 @app.before_request

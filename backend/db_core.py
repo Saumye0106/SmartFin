@@ -8,7 +8,14 @@ import sqlite3
 
 from flask import g
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'auth.db')
+# Everything SmartFin writes (the database and uploaded pictures) lives under DATA_DIR.
+# Locally that is this folder; in a container it is a mounted volume (SMARTFIN_DATA_DIR=/data),
+# so the data survives the container being replaced.
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.abspath(os.environ.get('SMARTFIN_DATA_DIR') or BACKEND_DIR)
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, 'auth.db')
+UPLOAD_DIR = os.path.join(DATA_DIR, 'uploads', 'profile_pictures')
 
 
 def get_db():

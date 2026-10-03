@@ -23,9 +23,8 @@ _detector = AnomalyDetector(contamination=0.15)
 
 
 def _db_path() -> str:
-    from pathlib import Path
-    here = Path(__file__).parent.parent  # backend/
-    return str(here / "auth.db")
+    from db_core import DB_PATH
+    return DB_PATH
 
 
 @nudge_bp.route("/", methods=["GET"])

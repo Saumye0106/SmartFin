@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../services/api';
+import api, { API_BASE_URL } from '../services/api';
 import './ProfilePage.css';
 
 // Phone Number Display Component
@@ -197,7 +197,7 @@ function ProfilePage() {
                 <div className="flex items-center gap-4">
                   {profile.profile_picture_url ? (
                     <img 
-                      src={`http://127.0.0.1:5000${profile.profile_picture_url}`}
+                      src={`${API_BASE_URL}${profile.profile_picture_url}`}
                       alt={profile.name}
                       className="w-16 h-16 rounded-full object-cover border-2 border-cyan-500/20"
                     />

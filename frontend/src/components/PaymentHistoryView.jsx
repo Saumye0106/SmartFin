@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import './PaymentHistoryView.css';
+import { API_BASE_URL } from '../services/api';
 
 const PaymentHistoryView = ({ loan, onClose }) => {
   const [payments, setPayments] = useState([]);
@@ -23,7 +24,7 @@ const PaymentHistoryView = ({ loan, onClose }) => {
         throw new Error('No authentication token found');
       }
 
-      const response = await fetch(`http://127.0.0.1:5000/api/loans/${loan.loan_id}/payments`, {
+      const response = await fetch(`${API_BASE_URL}/api/loans/${loan.loan_id}/payments`, {
         headers: { Authorization: `Bearer ${token}` }
       });
 
@@ -52,7 +53,7 @@ const PaymentHistoryView = ({ loan, onClose }) => {
         throw new Error('No authentication token found');
       }
 
-      const url = `http://127.0.0.1:5000/api/loans/${loan.loan_id}/payments/${paymentId}`;
+      const url = `${API_BASE_URL}/api/loans/${loan.loan_id}/payments/${paymentId}`;
       console.log('Deleting payment from URL:', url);
 
       const response = await fetch(url, {
