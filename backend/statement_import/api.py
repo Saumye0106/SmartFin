@@ -78,6 +78,12 @@ def recurring():
     return jsonify({"success": True, **service.recurring_summary(get_db(), int(get_jwt_identity()))})
 
 
+@statement_import_bp.route("/batches", methods=["GET"])
+@jwt_required()
+def list_batches():
+    return jsonify({"success": True, "batches": service.list_batches(get_db(), int(get_jwt_identity()))})
+
+
 @statement_import_bp.route("/batch/<batch_id>", methods=["DELETE"])
 @jwt_required()
 def undo_import(batch_id):

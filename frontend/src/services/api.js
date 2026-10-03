@@ -910,6 +910,68 @@ const api = {
     }
   },
 
+  async getRiskProfile() {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    const response = await axios.get(`${API_BASE_URL}/api/risk-profile`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    return response.data;
+  },
+
+  async listImportBatches() {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/import/batches`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error?.response?.data?.error || 'Failed to load past imports');
+    }
+  },
+
+  async getBudgetDataOverview() {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/budget/data`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error?.response?.data?.error || 'Failed to load stored data');
+    }
+  },
+
+  async deleteBudgetMonth(month) {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    try {
+      const response = await axios.delete(`${API_BASE_URL}/api/budget/month/${month}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error?.response?.data?.error || 'Failed to delete this month');
+    }
+  },
+
+  async deleteAllBudgetData() {
+    const token = this.getStoredToken();
+    if (!token) throw new Error('No authentication token found');
+    try {
+      const response = await axios.delete(`${API_BASE_URL}/api/budget/all`, {
+        headers: { Authorization: `Bearer ${token}` },
+        data: { confirm: 'DELETE' }
+      });
+      return response.data;
+    } catch (error) {
+      throw new Error(error?.response?.data?.error || 'Failed to delete budget history');
+    }
+  },
+
   async undoStatementImport(batchId) {
     const token = this.getStoredToken();
     if (!token) throw new Error('No authentication token found');

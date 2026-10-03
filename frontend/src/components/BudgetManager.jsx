@@ -5,6 +5,7 @@ import SmartFinFooter from './SmartFinFooter';
 import api from '../services/api';
 import StatementImport from './StatementImport';
 import RecurringPayments from './RecurringPayments';
+import BudgetDataManager from './BudgetDataManager';
 
 const CATEGORY_OPTIONS = [
   'rent',
@@ -34,11 +35,9 @@ function BudgetManager() {
   const [month, setMonth] = useState(currentMonth());
   const [summary, setSummary] = useState(null);
   const [expenses, setExpenses] = useState([]);
-  const [analysisResult, setAnalysisResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [savingBudget, setSavingBudget] = useState(false);
   const [savingExpense, setSavingExpense] = useState(false);
-  const [runningAnalysis, setRunningAnalysis] = useState(false);
   const [error, setError] = useState(null);
   const [editingExpenseId, setEditingExpenseId] = useState(null);
   const [editExpenseForm, setEditExpenseForm] = useState({
@@ -64,20 +63,12 @@ function BudgetManager() {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [sortBy, setSortBy] = useState('date-desc');
   const [groupBy, setGroupBy] = useState(null);
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [minAmount, setMinAmount] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [importVersion, setImportVersion] = useState(0);
-
-  const guidanceList = useMemo(() => {
-    if (!analysisResult?.guidance) return [];
-    if (Array.isArray(analysisResult.guidance)) return analysisResult.guidance;
-    if (Array.isArray(analysisResult.guidance.immediate_actions)) {
-      return analysisResult.guidance.immediate_actions;
-    }
-    if (Array.isArray(analysisResult.guidance.actions)) {
-      return analysisResult.guidance.actions;
-    }
-    return [];
-  }, [analysisResult]);
 
   const categoryComparison = useMemo(() => {
     const rows = summary?.category_comparison || [];
@@ -87,9 +78,34 @@ function BudgetManager() {
   }, [summary]);
 
   const filteredExpenses = useMemo(() => {
-    if (!selectedCategory) return expenses;
-    return expenses.filter((expense) => expense.category === selectedCategory);
-  }, [expenses, selectedCategory]);
+    const query = searchText.trim().toLowerCase();
+    const min = minAmount === '' ? null : Number(minAmount);
+    const max = maxAmount === '' ? null : Number(maxAmount);
+    return expenses.filter((expense) => {
+      const amount = Number(expense.amount);
+      if (selectedCategory && expense.category !== selectedCategory) return false;
+      if (sourceFilter && (expense.source || 'manual') !== sourceFilter) return false;
+      if (min !== null && amount < min) return false;
+      if (max !== null && amount > max) return false;
+      if (query && !`${expense.note || ''} ${expense.category}`.toLowerCase().includes(query)) return false;
+      return true;
+    });
+  }, [expenses, selectedCategory, sourceFilter, searchText, minAmount, maxAmount]);
+
+  const hasActiveFilters = Boolean(selectedCategory || sourceFilter || searchText || minAmount || maxAmount);
+  const clearFilters = () => {
+    setSelectedCategory(null);
+    setSourceFilter('');
+    setSearchText('');
+    setMinAmount('');
+    setMaxAmount('');
+  };
+
+  const shiftMonth = (delta) => {
+    const [y, m] = month.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  };
 
   const sortedAndGroupedExpenses = useMemo(() => {
     let sorted = [...filteredExpenses];
@@ -143,7 +159,6 @@ function BudgetManager() {
     try {
       setLoading(true);
       setError(null);
-      setAnalysisResult(null);
 
       const [summaryResponse, expensesResponse] = await Promise.all([
         api.getBudgetSummary(selectedMonth),
@@ -274,19 +289,6 @@ function BudgetManager() {
       await fetchMonthData(month);
     } catch (err) {
       setError(err.message || 'Failed to update expense');
-    }
-  };
-
-  const handleAnalyzeFromBudget = async () => {
-    try {
-      setRunningAnalysis(true);
-      setError(null);
-      const response = await api.predictFromBudget(month);
-      setAnalysisResult(response);
-    } catch (err) {
-      setError(err.message || 'Failed to analyze budget data');
-    } finally {
-      setRunningAnalysis(false);
     }
   };
 
@@ -588,13 +590,6 @@ function BudgetManager() {
           <section className="rounded-2xl border border-white/10 bg-black/30 p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Expense Entries</h2>
-              <button
-                onClick={handleAnalyzeFromBudget}
-                disabled={runningAnalysis || loading}
-                className="rounded-lg bg-white py-2 px-4 text-sm font-semibold text-black disabled:opacity-50"
-              >
-                {runningAnalysis ? 'Analyzing...' : 'Run Analyzer from This Month'}
-              </button>
             </div>
 
             <div className="mb-5 rounded-xl border border-white/10 bg-black/20 p-4">
@@ -643,28 +638,107 @@ function BudgetManager() {
               )}
             </div>
 
+            <div className="mb-4 rounded-xl border border-white/10 bg-black/20 p-4 space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-white/70">History for</span>
+                <button
+                  type="button"
+                  onClick={() => shiftMonth(-1)}
+                  aria-label="Previous month"
+                  className="rounded border border-white/20 px-2 py-1 text-xs text-white hover:bg-white/10"
+                >
+                  &lt;
+                </button>
+                <input
+                  type="month"
+                  value={month}
+                  onChange={(e) => e.target.value && setMonth(e.target.value)}
+                  className="bg-black/40 border border-white/20 rounded px-2 py-1 text-xs text-white"
+                />
+                <button
+                  type="button"
+                  onClick={() => shiftMonth(1)}
+                  aria-label="Next month"
+                  className="rounded border border-white/20 px-2 py-1 text-xs text-white hover:bg-white/10"
+                >
+                  &gt;
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMonth(currentMonth())}
+                  className="rounded border border-white/20 px-2 py-1 text-xs text-white/70 hover:bg-white/10"
+                >
+                  This month
+                </button>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                <input
+                  type="text"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  placeholder="Search note or category"
+                  className="col-span-2 md:col-span-2 bg-black/40 border border-white/20 rounded px-2 py-1 text-xs text-white placeholder-white/40"
+                />
+                <select
+                  value={selectedCategory || ''}
+                  onChange={(e) => setSelectedCategory(e.target.value || null)}
+                  className="bg-black/40 border border-white/20 rounded px-2 py-1 text-xs text-white"
+                >
+                  <option value="">All categories</option>
+                  {CATEGORY_OPTIONS.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+                <select
+                  value={sourceFilter}
+                  onChange={(e) => setSourceFilter(e.target.value)}
+                  className="bg-black/40 border border-white/20 rounded px-2 py-1 text-xs text-white"
+                >
+                  <option value="">All sources</option>
+                  <option value="manual">Manual</option>
+                  <option value="import">Imported</option>
+                </select>
+                <div className="flex gap-1">
+                  <input
+                    type="number"
+                    min="0"
+                    value={minAmount}
+                    onChange={(e) => setMinAmount(e.target.value)}
+                    placeholder="Min Rs."
+                    className="w-1/2 bg-black/40 border border-white/20 rounded px-2 py-1 text-xs text-white placeholder-white/40"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={maxAmount}
+                    onChange={(e) => setMaxAmount(e.target.value)}
+                    placeholder="Max Rs."
+                    className="w-1/2 bg-black/40 border border-white/20 rounded px-2 py-1 text-xs text-white placeholder-white/40"
+                  />
+                </div>
+              </div>
+              {hasActiveFilters && (
+                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-2">
+                  <p className="text-xs text-emerald-200">
+                    Showing {filteredExpenses.length} of {expenses.length} expenses
+                  </p>
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="text-xs text-emerald-300 hover:text-emerald-200 font-semibold"
+                  >
+                    Clear filters
+                  </button>
+                </div>
+              )}
+            </div>
+
             {loading ? (
               <p className="text-white/60 text-sm">Loading data...</p>
             ) : expenses.length === 0 ? (
               <p className="text-white/60 text-sm">No expenses recorded for this month.</p>
             ) : (
               <div className="space-y-3">
-                {selectedCategory && (
-                  <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-400/30 rounded-lg p-3">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm text-emerald-100">
-                        Filtering by: <span className="font-semibold capitalize">{selectedCategory}</span>
-                      </p>
-                      <p className="text-xs text-emerald-300">({filteredExpenses.length} expenses)</p>
-                    </div>
-                    <button
-                      onClick={() => setSelectedCategory(null)}
-                      className="text-xs text-emerald-300 hover:text-emerald-200 font-semibold"
-                    >
-                      Clear Filter
-                    </button>
-                  </div>
-                )}
                 <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
                   <div className="flex gap-2 items-center flex-1">
                     <label className="text-xs text-white/70 whitespace-nowrap">Sort by:</label>
@@ -696,7 +770,7 @@ function BudgetManager() {
                 </div>
                 <div className="overflow-x-auto">
                   {filteredExpenses.length === 0 ? (
-                    <p className="text-white/60 text-sm">No expenses found{selectedCategory ? ` in ${selectedCategory} category` : ''}.</p>
+                    <p className="text-white/60 text-sm">No expenses match the current filters.</p>
                   ) : (
                     <div>
                       {groupBy ? (
@@ -750,26 +824,11 @@ function BudgetManager() {
             )}
           </section>
 
-          {analysisResult && (
-            <section className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-6 space-y-4">
-              <div className="flex flex-wrap items-center gap-4">
-                <div>
-                  <p className="text-xs text-emerald-200/80 uppercase">Financial Health Score</p>
-                  <p className="text-3xl font-bold">{analysisResult.score}</p>
-                </div>
-                <div className="text-sm text-emerald-100/90">
-                  {analysisResult.classification?.category || 'Result'} for {analysisResult.month}
-                </div>
-              </div>
-              {guidanceList.length > 0 && (
-                <ul className="text-sm text-emerald-100/90 list-disc pl-5 space-y-1">
-                  {guidanceList.slice(0, 4).map((item, idx) => (
-                    <li key={idx}>{typeof item === 'string' ? item : JSON.stringify(item)}</li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          )}
+          <BudgetDataManager
+            month={month}
+            refreshKey={importVersion}
+            onChanged={() => { setImportVersion((v) => v + 1); fetchMonthData(month); }}
+          />
         </div>
       </div>
 

@@ -9,7 +9,8 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
-from db_core import execute_query, row_to_dict, rows_to_list
+from db_core import execute_query, get_db, row_to_dict, rows_to_list
+from budget import data_management
 from budget.service import (
     current_month_string,
     validate_month_string,
@@ -343,4 +344,40 @@ def get_budget_analysis_input():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@budget_bp.route('/api/budget/data', methods=['GET'])
+@jwt_required()
+def budget_data_overview():
+    """Counts of what is stored for the authenticated user."""
+    return jsonify({'success': True, **data_management.data_overview(get_db(), int(get_jwt_identity()))})
+
+
+@budget_bp.route('/api/budget/month/<month>', methods=['DELETE'])
+@jwt_required()
+def delete_budget_month(month):
+    """Delete one month's expenses, imported transactions and budget for the authenticated user."""
+    try:
+        month = datetime.strptime(validate_month_string(month), '%Y-%m').strftime('%Y-%m')
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    try:
+        return jsonify({'success': True, **data_management.delete_month(get_db(), int(get_jwt_identity()), month)})
+    except Exception as e:
+        get_db().rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@budget_bp.route('/api/budget/all', methods=['DELETE'])
+@jwt_required()
+def delete_all_budget_data():
+    """Delete all budget history for the authenticated user. Requires {"confirm": "DELETE"}."""
+    payload = request.get_json(silent=True) or {}
+    if payload.get('confirm') != data_management.CONFIRM_ALL_PHRASE:
+        return jsonify({'error': f'Send {{"confirm": "{data_management.CONFIRM_ALL_PHRASE}"}} to delete everything'}), 400
+    try:
+        return jsonify({'success': True, **data_management.delete_all(get_db(), int(get_jwt_identity()))})
+    except Exception as e:
+        get_db().rollback()
         return jsonify({'error': str(e)}), 500

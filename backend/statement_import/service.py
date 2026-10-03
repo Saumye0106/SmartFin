@@ -213,6 +213,19 @@ def undo_batch(conn, user_id: int, batch_id: str) -> dict:
     return {"transactions_removed": cur.rowcount, "expenses_removed": len(expense_ids)}
 
 
+def list_batches(conn, user_id: int) -> list[dict]:
+    """Past imports, newest first, so any of them can be undone later (not only right after importing)."""
+    rows = conn.execute(
+        """SELECT import_batch_id AS batch_id, MIN(created_at) AS imported_at,
+                  MIN(txn_date) AS period_start, MAX(txn_date) AS period_end,
+                  COUNT(*) AS transactions, COUNT(expense_id) AS expenses,
+                  ROUND(SUM(CASE WHEN direction = 'debit' THEN amount ELSE 0 END), 2) AS total_debit,
+                  ROUND(SUM(CASE WHEN direction = 'credit' THEN amount ELSE 0 END), 2) AS total_credit
+           FROM bank_transactions WHERE user_id = ? AND import_batch_id IS NOT NULL
+           GROUP BY import_batch_id ORDER BY imported_at DESC""", (user_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def _touched_months(dates) -> set[str]:
     """Months of the given dates plus each following month (salary paid early lands a month ahead)."""
     out = set()
