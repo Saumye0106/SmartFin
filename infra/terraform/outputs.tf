@@ -1,10 +1,11 @@
 output "node_public_ip" {
-  description = "Address of the server: the site is served here, and Ansible connects here."
+  description = "Address of the server, for SSH and Ansible. The site itself is reached through site_url."
   value       = aws_eip.node.public_ip
 }
 
 output "site_url" {
-  value = "http://${aws_eip.node.public_ip}"
+  description = "The address to give people."
+  value       = "https://${aws_cloudfront_distribution.site.domain_name}"
 }
 
 output "ssh_command" {

@@ -4,11 +4,11 @@ One EC2 server running Kubernetes (k3s), PostgreSQL on RDS, images in ECR, profi
 Terraform creates the AWS resources, Ansible sets up the server, Kubernetes runs the app.
 
 ```
-browser ──► Elastic IP ──► EC2 (k3s)
-                            ├─ frontend pods (nginx: site + forwards API calls)
-                            └─ backend pods  ──► RDS PostgreSQL (private subnets)
-                                             ──► S3 (profile pictures)
-                                             ──► Bedrock (optional)
+browser ──HTTPS──► CloudFront ──HTTP──► EC2 (k3s), port 80 open to CloudFront only
+                                         ├─ frontend pods (nginx: site + forwards API calls)
+                                         └─ backend pods  ──► RDS PostgreSQL (private subnets)
+                                                          ──► S3 (profile pictures)
+                                                          ──► Bedrock (optional)
 ```
 
 ## Cost
@@ -115,8 +115,10 @@ database snapshot). Set `db_deletion_protection = true` and `db_skip_final_snaps
 
 - `terraform.tfstate` contains the database password and the login-signing secret in plain text. It is git-ignored;
   keep it off shared drives. `versions.tf` shows how to move it to a private S3 bucket.
-- SSH (22) and the Kubernetes API (6443) are open only to `admin_cidr`. Ports 80 and 443 are open to everyone.
+- SSH (22) and the Kubernetes API (6443) are open only to `admin_cidr`. Port 80 accepts CloudFront only; the site is reached at the `site_url` output.
 - The database is not reachable from the internet, only from the server.
 - No access keys are stored on the server: it gets its permissions (ECR pull, the uploads bucket, the app's
   secrets, Bedrock) from an IAM role.
-- The site is served over plain HTTP until a domain and certificate are added.
+- HTTPS is provided by CloudFront on its free `*.cloudfront.net` address (`terraform output site_url`). The hop from
+  CloudFront to the server is plain HTTP; encrypting it needs a certificate on the server, which needs a domain name.
+- CloudFront costs nothing at this scale (its free tier covers 1 TB a month).

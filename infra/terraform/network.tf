@@ -70,28 +70,26 @@ resource "aws_route_table_association" "public" {
 
 resource "aws_security_group" "node" {
   name        = "${var.name}-node"
-  description = "k3s node: web traffic from anywhere, administration from one address"
+  description = "k3s node: web traffic from anywhere, administration from one address" # description is immutable; web traffic is now CloudFront only
   vpc_id      = aws_vpc.main.id
 
   tags = { Name = "${var.name}-node" }
 }
 
+# The addresses CloudFront connects from. AWS maintains this list.
+data "aws_ec2_managed_prefix_list" "cloudfront" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
+# Web traffic reaches the server only through CloudFront (cdn.tf), which is where HTTPS ends.
+# Note: this list counts as about 55 rules against the limit of 60 per security group.
 resource "aws_vpc_security_group_ingress_rule" "node_http" {
   security_group_id = aws_security_group.node.id
-  description       = "HTTP"
-  cidr_ipv4         = "0.0.0.0/0"
+  description       = "HTTP from CloudFront only"
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront.id
   ip_protocol       = "tcp"
   from_port         = 80
   to_port           = 80
-}
-
-resource "aws_vpc_security_group_ingress_rule" "node_https" {
-  security_group_id = aws_security_group.node.id
-  description       = "HTTPS"
-  cidr_ipv4         = "0.0.0.0/0"
-  ip_protocol       = "tcp"
-  from_port         = 443
-  to_port           = 443
 }
 
 resource "aws_vpc_security_group_ingress_rule" "node_ssh" {

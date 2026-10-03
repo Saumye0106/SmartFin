@@ -871,6 +871,7 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 |---|---|---|---|---|
 | 83 | `terraform plan` impossible | The machine's only AWS credentials were another project's IAM user without EC2/RDS/SSM rights | The user created IAM user `smartfin-deploy` and the CLI profile `smartfin`; Terraform uses it via `aws_profile`. Not worked around | First read-only AWS calls were denied |
 | 84 | Playbook failed at the first conditional: `module 'ast' has no attribute 'Str'` | WSL has ansible-core 2.15 on Python 3.14; `ast.Str` was removed from Python | ansible-core 2.21 in a venv (`~/.venvs/smartfin-ansible`; `python3 -m venv` needed `--without-pip` + `get-pip.py` because `python3-venv` isn't installed and sudo needs a password) | First real run; `--syntax-check` had passed |
+| 86 | Security headers set in nginx were missing on pages | In nginx an `add_header` inside a `location` replaces the ones set at `server` level, and `location /` has its own | CloudFront's managed security-headers policy now adds them (HSTS, nosniff, frame options, referrer policy); the nginx config still has the gap for anyone reaching it directly | Looked at the live response headers |
 | 85 | A missing profile picture returned 500 on AWS (404 locally) | Without `s3:ListBucket`, S3 answers AccessDenied instead of NoSuchKey for a missing object | Added `s3:ListBucket` on the bucket, limited to the `profile_pictures/` prefix | Live S3 check after the first deploy; the stand-in S3 client in the tests could not show it |
 
 ---
@@ -879,7 +880,7 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 
 **Decisions (user, 2026-10-04):** Kubernetes on EC2 using **k3s** (not EKS: about $20–40/month instead of $130–160, and Ansible gets a real job); chosen to learn/show the tools, not because the app needs it. ~~SQLite on a persistent volume, one backend replica~~ → **changed the same day: "we will migrate to postgres, so plan accordingly"**. PostgreSQL is now part of the deployment and comes **before** Terraform/Kubernetes, because it changes what gets provisioned. No custom domain yet.
 
-**LIVE since 2026-10-04: http://43.205.46.101** (Elastic IP; plain HTTP, no domain or certificate yet). **It bills about $40/month until `terraform destroy`.**
+**LIVE since 2026-10-04: https://d26yos94s5xald.cloudfront.net** (CloudFront in front of the node; the node's Elastic IP 43.205.46.101 is for SSH/Ansible only and no longer answers HTTP from the internet). **It bills about $40/month until `terraform destroy`.**
 - AWS profile `smartfin` (IAM user `smartfin-deploy`, same account as the older `pixelframe-dev` default profile, which lacks the permissions and must not be used for this). Region `ap-south-1`.
 - Node: EC2 `t3.small`, Ubuntu 24.04, k3s v1.33.5; 2 backend + 2 frontend pods; about 1.3 of 1.9 GB memory used and a little swap in use: tight. Set `instance_type = "t3.medium"` if it struggles.
 - Database: RDS PostgreSQL 17.9 `db.t4g.micro`, private; 21 tables created by the app on first start; empty (the check account was removed).
@@ -888,7 +889,9 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 - Ansible must be run with `~/.venvs/smartfin-ansible/bin/ansible-playbook` in WSL (ansible-core 2.21; the system 2.15 fails on Python 3.14). The SSH key was copied to `~/.ssh/smartfin` inside WSL.
 - Redeploy: build and push both images with a new tag, then rerun the playbook with `-e image_tag=<tag>` (steps in `infra/README.md`).
 - Verified from outside: full black-box check (site, deep links, register/login, risk score, portfolio, 401 without token), S3 picture round trip, database port and backend port 5000 closed to the internet, Kubernetes API answers 401 from the admin IP.
-- **Not done:** HTTPS (logins travel in clear text: no real data in the live site yet), CD from GitHub, CloudWatch logs/alarms, restore test, connection pool, Bedrock through the IAM role (untested).
+- HTTPS: `infra/terraform/cdn.tf`. CloudFront default certificate, HTTP→HTTPS redirect, caching disabled except `/assets/*`, all headers forwarded (Authorization included), AWS managed security-headers policy (HSTS etc.). The node's port 80 is open only to CloudFront's managed prefix list (about 55 of the 60 rules allowed per security group: don't add many more rules to it). CloudFront → node is plain HTTP.
+- Check the live site with the CloudFront address, never the IP. The Ansible playbook's own health check runs on the server against 127.0.0.1 and is unaffected.
+- **Not done:** end-to-end encryption to the node (needs a domain), CD from GitHub, CloudWatch logs/alarms, restore test, connection pool, Bedrock through the IAM role (untested).
 
 **Terraform design choices:** no NAT gateway (the node is in a public subnet; the database's private subnets have no internet route); SSH and the Kubernetes API open only to `admin_cidr`; IMDSv2 with hop limit 2 so pods can use the node's role; RDS password and JWT secret generated by Terraform and stored as SSM SecureString parameters under `/smartfin/` (they are also in the local, git-ignored state file); ECR tags immutable; practice-friendly teardown defaults (`force_destroy`, no final snapshot, no deletion protection). Estimated cost about $40/month (from memory, unverified). Bedrock through the IAM role is untested: the app currently authenticates with `AWS_BEARER_TOKEN_BEDROCK`.
 
@@ -904,7 +907,7 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 | 6 | Ansible (`infra/ansible/site.yml`): base hardening, swap, k3s (pinned version, secrets encryption), secrets from SSM → Kubernetes Secret, ECR pull-secret refresh timer, apply manifests, wait for rollout, health check | ✅ **run 2026-10-04** (25 tasks ok) |
 | 7 | Kubernetes manifests (`infra/k8s/`, kustomize: `base`, `overlays/local`, `overlays/aws`): backend ×2 and frontend ×2 Deployments, Services, Ingress (Traefik), PodDisruptionBudget, ConfigMap | ✅ 2026-10-04, **verified on a real k3s cluster in Docker** |
 | 8 | GitHub Actions | 🟡 CI written 2026-10-04 (`.github/workflows/ci.yml`: backend tests with a PostgreSQL service, frontend build, both images, Terraform validate, kustomize render). Its exact test command passes locally (171). **Never run on GitHub**: `main` is 37+ commits ahead of `origin` and nothing has been pushed. Automatic deploy (CD) not written: the node's SSH is closed to GitHub's runners, so it needs an OIDC role + SSM Run Command, after the first manual deploy works |
-| 9 | Operations: CloudWatch logs/alarms, database restore test, teardown script, HTTPS | ⬜ |
+| 9 | Operations | 🟡 HTTPS done 2026-10-04 (CloudFront). Not done: logs/alarms, database restore test, teardown script beyond `terraform destroy`, connection pool |
 
 **PostgreSQL migration — done 2026-10-04.** Measured scope beforehand: 21 files importing `sqlite3`, 23 connect sites, 244 SQL statements, 21 tables. It turned out far smaller than estimated because almost all of the SQL was already portable; the work was one adapter plus eight statement rewrites.
 
@@ -963,7 +966,7 @@ Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BA
 
 **Prepared locally 2026-10-04:** SSH key `~/.ssh/smartfin` (ed25519, no passphrase) and `infra/terraform/terraform.tfvars` (git-ignored: profile `smartfin`, the user's current public IP as `admin_cidr`, the public key). `terraform plan` now fails only with "failed to get shared config profile, smartfin". If the user's IP changes, update `admin_cidr`.
 
-**Still to do:** HTTPS first (domain + Let's Encrypt, or CloudFront in front), then CD from GitHub (OIDC role + SSM Run Command), logs/alarms, a database restore test, a connection pool, pushing `main` to GitHub.
+**Still to do:** CD from GitHub (OIDC role + SSM Run Command), logs/alarms, a database restore test, a connection pool, pushing `main` to GitHub.
 
 **Rules**
 - The local `backend/auth.db` holds the user's real bank statement. It must never enter an image, the repo or AWS; deployments start with an empty database. `backend/.dockerignore` enforces this for images: keep it that way.
@@ -976,6 +979,7 @@ Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BA
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-04 | Claude Code (Opus 5.5) | HTTPS for the live site through CloudFront's free address (user chose it over a domain): `infra/terraform/cdn.tf`, node port 80 restricted to CloudFront's prefix list, 443 rule removed, security-headers policy. Live at https://d26yos94s5xald.cloudfront.net; full check and the S3 picture round trip pass over HTTPS, HTTP redirects, direct HTTP to the server is blocked, assets are served from the edge cache. §15 #86, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | **SmartFin deployed to AWS** at http://43.205.46.101. `terraform apply` (41 resources, user approved after reviewing the plan), images pushed to ECR as `46654cc`, playbook run (failed once on the Ansible/Python mismatch, then 25 tasks ok). Verified from outside incl. S3 pictures; fixed the missing-picture 500 by adding `s3:ListBucket`. Live database left empty. Costs about $40/month until destroyed. No HTTPS yet. §15 #83–#85, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | User said "go ahead" but the `smartfin` AWS profile does not exist yet (only `pixelframe-dev`), so nothing was applied. Did the local preparation instead: SSH key, `terraform.tfvars`, and `.github/workflows/ci.yml` (CI only). `.gitattributes` now keeps LF for `*.sh` and the nginx config. Note: `.github/workflows/auth-ci.yml` watches `services/auth/**`, which doesn't exist; `deploy.yml` still publishes the frontend to GitHub Pages on every push to `main` |
 | 2026-10-04 | Claude Code (Opus 5.5) | Deployment phases 6–7. `infra/k8s/` kustomize manifests verified on a real k3s cluster in Docker (end-to-end check through the ingress, non-root + read-only pods, zero failed requests across a rolling restart). `infra/ansible/site.yml` + template + `from_terraform.sh` (syntax-checked, never run on a server). `dbapi.startup_lock()` so several backend copies can start together on PostgreSQL (test proves the race without it). `infra/README.md` gained the deploy steps. Phase 4 + Terraform committed as `184430c`. §14 #33–#35, §17 |
