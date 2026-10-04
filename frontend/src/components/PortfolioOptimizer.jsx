@@ -1,29 +1,31 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import Sidebar from './Sidebar';
+import SmartFinFooter from './SmartFinFooter';
 import './PortfolioOptimizer.css';
 
 // ── Color palette for asset classes ─────────────────────────────────────────
 const ASSET_COLORS = {
-  'Large-Cap Equity': '#7c3aed',
-  'Mid-Cap Equity': '#a855f7',
-  'Small-Cap Equity': '#c084fc',
-  'International Equity (Nasdaq 100)': '#6366f1',
-  'Short-Term Debt': '#3b82f6',
-  'Gold': '#f59e0b',
+  'Large-Cap Equity': '#f97316',
+  'Mid-Cap Equity': '#fb923c',
+  'Small-Cap Equity': '#fdba74',
+  'International Equity (Nasdaq 100)': '#fb7185',
+  'Short-Term Debt': '#38bdf8',
+  'Gold': '#facc15',
   'Silver': '#94a3b8',
-  'REIT (Real Estate)': '#14b8a6',
-  'FD / Cash': '#10b981',
-  'Fixed Deposit': '#10b981',
+  'REIT (Real Estate)': '#2dd4bf',
+  'FD / Cash': '#a3e635',
+  'Fixed Deposit': '#a3e635',
 };
 
 const CAT_COLORS = {
-  'Equity': '#7c3aed',
-  'Debt': '#3b82f6',
-  'Precious Metals': '#f59e0b',
-  'Real Estate': '#14b8a6',
-  'Gold': '#f59e0b',
-  'FD / Cash': '#10b981',
+  'Equity': '#f97316',
+  'Debt': '#38bdf8',
+  'Precious Metals': '#facc15',
+  'Real Estate': '#2dd4bf',
+  'Gold': '#facc15',
+  'FD / Cash': '#a3e635',
 };
 
 const RISK_LABELS = {
@@ -36,18 +38,18 @@ const RISK_CLASS = (r) =>
   r <= 3 ? 'conservative' : r <= 6 ? 'moderate' : 'aggressive';
 
 const ADJUSTMENT_LABELS = {
-  high_emi_reduced_equity: '🏦 High EMI — equity reduced',
-  moderate_emi_reduced_midcap: '📉 Moderate EMI — mid-cap trimmed',
-  multiple_loans_liquidity_buffer: '💧 Multiple loans — liquidity added',
-  low_savings_rate_conservative_shift: '⚠️ Low savings — conservative shift',
+  high_emi_reduced_equity: 'High EMI — equity reduced',
+  moderate_emi_reduced_midcap: 'Moderate EMI — mid-cap trimmed',
+  multiple_loans_liquidity_buffer: 'Multiple loans — liquidity added',
+  low_savings_rate_conservative_shift: 'Low savings — conservative shift',
 };
 
 function getLabel(key) {
   // Handle dynamic keys like "short_term_goal_5mo_shifted_debt"
   if (key.startsWith('short_term_goal'))
-    return `🎯 Short-term goal — shifted to debt`;
+    return `Short-term goal — shifted to debt`;
   if (key.startsWith('medium_term_goal'))
-    return `🎯 Medium-term goal — debt tilt`;
+    return `Medium-term goal — debt tilt`;
   return ADJUSTMENT_LABELS[key] || key.replaceAll('_', ' ');
 }
 
@@ -61,7 +63,7 @@ function DonutChart({ data, size = 180, centerLabel, centerValue }) {
 
   const slices = data.map(({ label, pct, color }) => {
     const dash = (pct / 100) * circumference;
-    const offset = circumference - cumulativePct * circumference / 100;
+    const offset = -(cumulativePct / 100) * circumference;
     cumulativePct += pct;
     return { label, pct, color, dash, offset };
   });
@@ -77,7 +79,7 @@ function DonutChart({ data, size = 180, centerLabel, centerValue }) {
             fill="none"
             stroke={color}
             strokeWidth={size * 0.12}
-            strokeDasharray={`${dash} ${circumference}`}
+            strokeDasharray={`${dash} ${circumference - dash}`}
             strokeDashoffset={offset}
             style={{ transition: 'stroke-dasharray 0.8s cubic-bezier(0.4,0,0.2,1)' }}
           />
@@ -112,9 +114,9 @@ function FrontierChart({ points, special }) {
     <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: '100%' }}>
       <defs>
         <linearGradient id="frontierGrad" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#34d399" />
+          <stop offset="0%" stopColor="#fde68a" />
           <stop offset="50%" stopColor="#f59e0b" />
-          <stop offset="100%" stopColor="#ef4444" />
+          <stop offset="100%" stopColor="#ea580c" />
         </linearGradient>
       </defs>
 
@@ -147,7 +149,7 @@ function FrontierChart({ points, special }) {
       {special && Object.entries(special).map(([key, sp]) => (
         <g key={key}>
           <circle cx={sx(sp.risk)} cy={sy(sp.return)} r={7}
-            fill={key === 'gmv' ? '#34d399' : '#f59e0b'}
+            fill={key === 'gmv' ? '#fde68a' : '#f97316'}
             stroke="#fff" strokeWidth={2} />
           <text x={sx(sp.risk) + 10} y={sy(sp.return) + 4}
             fill="rgba(255,255,255,0.7)" fontSize="9.5">
@@ -228,39 +230,64 @@ export default function PortfolioOptimizer() {
   const riskPct = portfolio?.portfolio?.risk_pct || 0;
   const sharpe = portfolio?.portfolio?.sharpe_ratio || 0;
 
-  const donutData = Object.entries(catWeights).map(([cat, pct]) => ({
-    label: cat, pct, color: CAT_COLORS[cat] || '#888',
-  }));
+  const donutData = Object.entries(catWeights)
+    .map(([cat, pct]) => ({ label: cat, pct, color: CAT_COLORS[cat] || '#888' }))
+    .sort((a, b) => b.pct - a.pct);
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div className="portfolio-page">
-      <button
-        onClick={() => navigate('/dashboard')}
-        style={{
-          background: 'rgba(255,255,255,0.06)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          color: 'rgba(255,255,255,0.6)',
-          borderRadius: '0.625rem',
-          padding: '0.4rem 0.9rem',
-          cursor: 'pointer',
-          fontSize: '0.8rem',
-          marginBottom: '1.25rem',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '0.4rem',
-        }}
-      >
-        ← Back
-      </button>
-
-      <div className="portfolio-header">
-        <h1>📊 Portfolio Optimizer</h1>
-        <p>
-          Markowitz Mean-Variance Optimization + XGBoost Return Prediction —
-          personalized to your risk profile, goals & loans.
-        </p>
+    <div className="portfolio-page min-h-screen bg-[#030303] text-white flex flex-col">
+      {/* Background Effects */}
+      <div className="fixed inset-0 z-0 pointer-events-none">
+        <div className="absolute inset-0 bg-grid"></div>
+        <div className="absolute top-[-20%] right-[20%] w-[600px] h-[600px] bg-amber-500/20 rounded-full blur-[120px] mix-blend-screen animate-pulse-slow"></div>
+        <div className="absolute bottom-[-10%] left-[-10%] w-[500px] h-[500px] bg-orange-500/15 rounded-full blur-[100px] mix-blend-screen"></div>
       </div>
+
+      {/* Sidebar */}
+      <Sidebar />
+
+      {/* Navigation Header */}
+      <nav className="fixed top-0 left-0 w-full z-50">
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-md border-b border-white/5"></div>
+        <div className="max-w-7xl mx-auto px-6 h-16 relative flex items-center justify-between">
+          <button
+            onClick={() => navigate('/')}
+            className="flex items-center gap-3 group transition-all hover:opacity-80"
+          >
+            <div className="w-8 h-8 flex items-center justify-center bg-white/5 rounded-lg border border-white/10 group-hover:border-amber-500/50 transition-colors">
+              <iconify-icon icon="solar:layers-minimalistic-bold-duotone" className="text-amber-400 text-xl"></iconify-icon>
+            </div>
+            <span className="font-display font-bold text-lg text-white">SmartFin</span>
+            <span className="text-[10px] text-white/30 font-mono">PORTFOLIO</span>
+          </button>
+
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 transition-all text-xs font-medium"
+          >
+            <iconify-icon icon="solar:arrow-left-linear" width="16"></iconify-icon>
+            <span className="hidden md:inline">Back to Dashboard</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* Main Content */}
+      <main className="relative z-10 pt-24 pb-16 px-6 ml-20 flex-1">
+        <div className="max-w-7xl mx-auto">
+      {/* Header */}
+      <section className="mb-12">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+          <span className="text-xs text-white/50 font-medium tracking-widest uppercase">Asset Allocation</span>
+        </div>
+        <h1 className="font-display text-4xl md:text-5xl font-bold text-white mb-4 tracking-tight">
+          Portfolio <span className="bg-gradient-to-r from-amber-300 to-orange-500 bg-clip-text text-transparent">Optimizer</span>
+        </h1>
+        <p className="text-white/50 max-w-2xl">
+          Mean-variance optimization on real Indian market data, adjusted for your risk level, loans and goals.
+        </p>
+      </section>
 
       <div className="portfolio-grid">
         {/* ── Left: Input Panel ─────────────────────────────────────── */}
@@ -268,7 +295,7 @@ export default function PortfolioOptimizer() {
 
           {/* Input Card */}
           <div className="portfolio-card">
-            <h2>⚙️ Configure Portfolio</h2>
+            <h2><iconify-icon icon="solar:tuning-2-linear" width="20" className="text-amber-400"></iconify-icon> Configure Portfolio</h2>
 
             <div className="input-field-group">
               <label>Monthly Investable Amount (₹)</label>
@@ -287,7 +314,7 @@ export default function PortfolioOptimizer() {
                 <label style={{ fontSize: '0.8rem', color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Risk Tolerance
                 </label>
-                <span style={{ fontSize: '0.8rem', color: '#a78bfa', fontWeight: 700 }}>
+                <span style={{ fontSize: '0.8rem', color: '#fbbf24', fontWeight: 700 }}>
                   {riskScore}/10
                 </span>
               </div>
@@ -306,7 +333,7 @@ export default function PortfolioOptimizer() {
               />
               <div>
                 <span className={`risk-badge ${RISK_CLASS(riskScore)}`}>
-                  {riskScore <= 3 ? '🛡️' : riskScore <= 6 ? '⚖️' : '🚀'} {RISK_LABELS[riskScore]}
+                  {RISK_LABELS[riskScore]}
                 </span>
               </div>
             </div>
@@ -326,7 +353,7 @@ export default function PortfolioOptimizer() {
                 fontSize: '0.82rem',
                 marginBottom: '0.75rem',
               }}>
-                ⚠️ {error}
+                {error}
               </div>
             )}
 
@@ -345,7 +372,7 @@ export default function PortfolioOptimizer() {
 
           {/* Model Info Card */}
           <div className="portfolio-card">
-            <h2>🤖 ML Model Info</h2>
+            <h2><iconify-icon icon="solar:cpu-bolt-linear" width="20" className="text-amber-400"></iconify-icon> Data and Model</h2>
             {dataSource && (
               <div
                 style={{
@@ -353,20 +380,20 @@ export default function PortfolioOptimizer() {
                   padding: '0.5rem 0.75rem',
                   borderRadius: '8px',
                   marginBottom: '0.9rem',
-                  background: dataSource.type === 'real_historical' ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.15)',
-                  border: `1px solid ${dataSource.type === 'real_historical' ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.4)'}`,
-                  color: dataSource.type === 'real_historical' ? '#6ee7b7' : '#fbbf24',
+                  background: dataSource.type === 'real_historical' ? 'rgba(255,255,255,0.04)' : 'rgba(239,68,68,0.12)',
+                  border: `1px solid ${dataSource.type === 'real_historical' ? 'rgba(251,191,36,0.25)' : 'rgba(239,68,68,0.35)'}`,
+                  color: dataSource.type === 'real_historical' ? 'rgba(255,255,255,0.65)' : '#fca5a5',
                 }}
               >
                 {dataSource.type === 'real_historical' ? (
-                  <>📊 Real market data from {Object.keys(dataSource.per_asset_range || {}).length} sources
+                  <>Real market data from {Object.keys(dataSource.per_asset_range || {}).length} sources
                     (NSE indices &amp; ETFs, liquid-fund NAV, COMEX silver × USD/INR), {(() => {
                       const yrs = Object.values(dataSource.per_asset_range || {}).map(r => r.months / 12);
                       return yrs.length ? `${Math.min(...yrs).toFixed(0)}–${Math.max(...yrs).toFixed(0)} years` : '';
                     })()} of history per asset. Expected returns are shrunk toward a risk-based prior;
                     {' '}risk is estimated from weekly returns. Fixed Deposit is assumption-based (no market series).</>
                 ) : (
-                  <>⚠️ Running on synthetic (simulated) data — not real market history. Run
+                  <>Running on synthetic (simulated) data — not real market history. Run
                     {' '}<code>fetch_real_data.py</code> on the backend to switch to real data.</>
                 )}
               </div>
@@ -457,11 +484,11 @@ export default function PortfolioOptimizer() {
           {!portfolio ? (
             <div className="portfolio-card" style={{ minHeight: 400 }}>
               <div className="portfolio-empty">
-                <div className="empty-icon">📊</div>
+                <div className="empty-icon"><iconify-icon icon="solar:pie-chart-2-bold-duotone" width="56" className="text-amber-400"></iconify-icon></div>
                 <h3>Your optimized portfolio will appear here</h3>
                 <p>
                   Set your investable amount and risk score, then click
-                  "Optimize Portfolio" to get your personalized ML-powered allocation.
+                  "Optimize Portfolio" to get your personalized allocation.
                 </p>
               </div>
             </div>
@@ -471,19 +498,19 @@ export default function PortfolioOptimizer() {
               <div className="portfolio-stats-row">
                 <div className="stat-chip">
                   <span className="chip-label">Expected Return</span>
-                  <span className="chip-value" style={{ color: '#34d399' }}>
+                  <span className="chip-value" style={{ color: '#fde68a' }}>
                     {expRet.toFixed(1)}% / yr
                   </span>
                 </div>
                 <div className="stat-chip">
                   <span className="chip-label">Volatility</span>
-                  <span className="chip-value" style={{ color: '#f59e0b' }}>
+                  <span className="chip-value" style={{ color: '#fb7185' }}>
                     {riskPct.toFixed(1)}%
                   </span>
                 </div>
                 <div className="stat-chip">
                   <span className="chip-label">Sharpe Ratio</span>
-                  <span className="chip-value" style={{ color: '#a78bfa' }}>
+                  <span className="chip-value" style={{ color: '#fbbf24' }}>
                     {sharpe.toFixed(2)}
                   </span>
                 </div>
@@ -491,16 +518,16 @@ export default function PortfolioOptimizer() {
                   <span className="chip-label">Engine</span>
                   <span className="chip-value" style={{ fontSize: '0.85rem' }}>
                     {(() => {
-                      if (portfolio.engine !== 'ml_predicted') return '📈 Historical';
+                      if (portfolio.engine !== 'ml_predicted') return 'Historical';
                       const w = portfolio.model_metadata?.blend?.avg_ml_weight ?? 0;
-                      return w > 0 ? `🤖 ML blend (${(w * 100).toFixed(0)}%)` : '📈 Historical avg';
+                      return w > 0 ? `ML blend (${(w * 100).toFixed(0)}%)` : 'Historical avg';
                     })()}
                   </span>
                 </div>
                 <div className="stat-chip">
                   <span className="chip-label">Data</span>
                   <span className="chip-value" style={{ fontSize: '0.85rem' }}>
-                    {portfolio.data_source?.type === 'real_historical' ? '📊 Real market data' : '⚠️ Synthetic'}
+                    {portfolio.data_source?.type === 'real_historical' ? 'Real market data' : 'Synthetic'}
                   </span>
                 </div>
               </div>
@@ -530,7 +557,7 @@ export default function PortfolioOptimizer() {
                       if (t === 'frontier' && !frontier) loadFrontier();
                     }}
                   >
-                    {t === 'overview' ? '🍩 Overview' : t === 'breakdown' ? '📋 Breakdown' : t === 'frontier' ? '📈 Frontier' : '🔀 What-If'}
+                    {t === 'overview' ? 'Overview' : t === 'breakdown' ? 'Breakdown' : t === 'frontier' ? 'Frontier' : 'What-If'}
                   </button>
                 ))}
               </div>
@@ -539,7 +566,7 @@ export default function PortfolioOptimizer() {
               {activeTab === 'overview' && (
                 <>
                   <div className="portfolio-card">
-                    <h2>🍩 Asset Allocation</h2>
+                    <h2><iconify-icon icon="solar:pie-chart-2-linear" width="20" className="text-amber-400"></iconify-icon> Asset Allocation</h2>
                     <div className="allocation-donut-wrap">
                       <div className="donut-svg-wrap">
                         <DonutChart
@@ -562,7 +589,7 @@ export default function PortfolioOptimizer() {
                   </div>
 
                   <div className="portfolio-card">
-                    <h2>📅 Projected Returns</h2>
+                    <h2><iconify-icon icon="solar:calendar-linear" width="20" className="text-amber-400"></iconify-icon> Projected Returns</h2>
                     <div className="projections-grid">
                       {[['1yr', '1 Year'], ['3yr', '3 Years'], ['5yr', '5 Years'], ['10yr', '10 Years']].map(([key, label]) => (
                         projections[key] != null && (
@@ -587,7 +614,7 @@ export default function PortfolioOptimizer() {
               {/* ── Breakdown Tab ── */}
               {activeTab === 'breakdown' && (
                 <div className="portfolio-card">
-                  <h2>📋 Asset Breakdown</h2>
+                  <h2><iconify-icon icon="solar:list-linear" width="20" className="text-amber-400"></iconify-icon> Asset Breakdown</h2>
                   <table className="asset-table">
                     <thead>
                       <tr>
@@ -622,13 +649,13 @@ export default function PortfolioOptimizer() {
                                 className="asset-weight-bar"
                                 style={{
                                   width: `${alloc.weight_pct}%`,
-                                  background: ASSET_COLORS[alloc.display_name] || '#7c3aed',
+                                  background: ASSET_COLORS[alloc.display_name] || '#f59e0b',
                                 }}
                               />
                             </div>
                           </td>
                           <td>₹{(alloc.amount_inr || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
-                          <td style={{ color: '#34d399' }}>
+                          <td style={{ color: '#fde68a' }}>
                             {(alloc.expected_return_annual * 100).toFixed(1)}%
                           </td>
                         </tr>
@@ -641,7 +668,7 @@ export default function PortfolioOptimizer() {
               {/* ── Frontier Tab ─── */}
               {activeTab === 'frontier' && (
                 <div className="portfolio-card">
-                  <h2>📈 Efficient Frontier</h2>
+                  <h2><iconify-icon icon="solar:graph-up-linear" width="20" className="text-amber-400"></iconify-icon> Efficient Frontier</h2>
                   <p style={{ fontSize: '0.82rem', color: 'rgba(255,255,255,0.4)', marginBottom: '1.25rem' }}>
                     The efficient frontier shows all optimal portfolios — no other allocation
                     gives higher return for the same risk level. Your portfolio (Risk {riskScore}/10) is
@@ -675,6 +702,10 @@ export default function PortfolioOptimizer() {
           )}
         </div>
       </div>
+        </div>
+      </main>
+
+      <SmartFinFooter iconClass="text-amber-400" statusDotClass="bg-amber-400" />
     </div>
   );
 }
@@ -719,7 +750,7 @@ function WhatIfPanel({ amount }) {
 
   if (error) return (
     <div className="portfolio-card">
-      <div style={{ color: '#fca5a5', fontSize: '0.85rem' }}>⚠️ {error}</div>
+      <div style={{ color: '#fca5a5', fontSize: '0.85rem' }}>{error}</div>
     </div>
   );
 
@@ -737,7 +768,7 @@ function WhatIfPanel({ amount }) {
         return (
           <div key={sc.name} className="portfolio-card">
             <h2>
-              {sc.name === 'Conservative' ? '🛡️' : sc.name === 'Moderate' ? '⚖️' : '🚀'} {sc.name}
+              {sc.name}
               <span style={{ marginLeft: 'auto', fontSize: '0.78rem', color: 'rgba(255,255,255,0.4)', fontWeight: 400 }}>
                 Risk Score {sc.risk_score}/10
               </span>
@@ -746,15 +777,15 @@ function WhatIfPanel({ amount }) {
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
               <div className="stat-chip">
                 <span className="chip-label">Return</span>
-                <span className="chip-value" style={{ color: '#34d399', fontSize: '0.95rem' }}>{ret.toFixed(1)}%</span>
+                <span className="chip-value" style={{ color: '#fde68a', fontSize: '0.95rem' }}>{ret.toFixed(1)}%</span>
               </div>
               <div className="stat-chip">
                 <span className="chip-label">Risk</span>
-                <span className="chip-value" style={{ color: '#f59e0b', fontSize: '0.95rem' }}>{risk.toFixed(1)}%</span>
+                <span className="chip-value" style={{ color: '#fb7185', fontSize: '0.95rem' }}>{risk.toFixed(1)}%</span>
               </div>
               <div className="stat-chip">
                 <span className="chip-label">Sharpe</span>
-                <span className="chip-value" style={{ color: '#a78bfa', fontSize: '0.95rem' }}>{sharpe.toFixed(2)}</span>
+                <span className="chip-value" style={{ color: '#fbbf24', fontSize: '0.95rem' }}>{sharpe.toFixed(2)}</span>
               </div>
             </div>
 
