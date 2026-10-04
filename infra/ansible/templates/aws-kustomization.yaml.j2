@@ -21,6 +21,9 @@ configMapGenerator:
     literals:
       - AWS_REGION={{ aws_region }}
       - SMARTFIN_UPLOADS_BUCKET={{ uploads_bucket }}
+      # Bedrock through the node's IAM role. Nova in ap-south-1 is only offered through the APAC inference profile.
+      - BEDROCK_MODEL_ID={{ bedrock_model_id | default('apac.amazon.nova-pro-v1:0') }}
+      - SMARTFIN_AI_GUIDANCE_ENABLED={{ ai_guidance_enabled | default('true') }}
 
 patches:
   - target:

@@ -15,12 +15,13 @@ AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
 AWS_BEARER_TOKEN = os.environ.get('AWS_BEARER_TOKEN_BEDROCK', '')
 MODEL_ID = os.environ.get('BEDROCK_MODEL_ID', 'amazon.nova-pro-v1:0')
 
-# Initialize Bedrock client with bearer token
+# Initialize Bedrock client. boto3 reads AWS_BEARER_TOKEN_BEDROCK itself when it is set;
+# otherwise it uses the default credential chain (on AWS, the server's IAM role).
 def get_bedrock_client():
-    """Create and return a boto3 bedrock-runtime client with bearer token auth."""
-    if not AWS_BEARER_TOKEN:
-        raise ValueError("AWS_BEARER_TOKEN_BEDROCK is not set in .env")
-    
+    """Create and return a boto3 bedrock-runtime client."""
+    if not AWS_BEARER_TOKEN and boto3.Session().get_credentials() is None:
+        raise ValueError("No Bedrock credentials: set AWS_BEARER_TOKEN_BEDROCK or run with an AWS role")
+
     return boto3.client(
         service_name='bedrock-runtime',
         region_name=AWS_REGION,
@@ -862,9 +863,6 @@ def chat(user_message, conversation_history, app_context):
     Returns:
         (assistant_text, updated_history, widgets)
     """
-    if not AWS_BEARER_TOKEN:
-        return "Bedrock API is not configured. Please set AWS_BEARER_TOKEN_BEDROCK in the .env file.", conversation_history, []
-
     widgets = []
     max_iterations = 5
 

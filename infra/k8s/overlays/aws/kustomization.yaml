@@ -25,6 +25,8 @@ configMapGenerator:
     literals:
       - AWS_REGION=REGION
       - SMARTFIN_UPLOADS_BUCKET=BUCKET
+      - BEDROCK_MODEL_ID=apac.amazon.nova-pro-v1:0
+      - SMARTFIN_AI_GUIDANCE_ENABLED=true
 
 patches:
   - target:
