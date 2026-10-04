@@ -92,6 +92,12 @@ jobs:
       - name: Build the frontend image
         run: docker build -t smartfin-frontend:${{ github.sha }} frontend
 
+      # GitHub's Ubuntu runners no longer include Terraform.
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.9"
+          terraform_wrapper: false
+
       - name: Check Terraform and the Kubernetes manifests
         run: |
           terraform -chdir=infra/terraform fmt -check
