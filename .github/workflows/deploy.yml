@@ -1,9 +1,8 @@
 name: Deploy Frontend to GitHub Pages
 
+# Manual only. The app is deployed to AWS by deploy-aws.yml; this older GitHub Pages copy of the
+# frontend points at a backend that is no longer the live one. Run it by hand if it is still wanted.
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:

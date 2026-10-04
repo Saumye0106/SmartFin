@@ -9,10 +9,11 @@
 
 **SmartFin** is a personal finance management web application built as a portfolio/academic project. The goal is to demonstrate real, interview-worthy ML modules rather than fake heuristic models.
 
-- **Stack:** Flask (Python) backend + React (Vite) frontend
+- **Stack:** Flask (Python) backend + React (Vite) frontend; Docker images; Kubernetes (k3s) on AWS, provisioned with Terraform and configured with Ansible (§17)
+- **Live:** https://d26yos94s5xald.cloudfront.net (since 2026-10-04; costs about $40/month until `terraform destroy`)
 - **Database:** SQLite (`auth.db`) locally by default; **PostgreSQL** when `DATABASE_URL` is set (containers, AWS). Same code and SQL for both, via `backend/dbapi.py`
 - **Auth:** Flask-JWT-Extended (Bearer tokens)
-- **Port:** Backend → `5000`, Frontend (dev) → `5173`
+- **Port:** Backend → `5000`, Frontend (dev) → `5173`; containers via `docker compose` → `8088`
 - **Target Audience:** Students and early-career professionals in India
 - **ML that is real (as of 2026-10-03):** the health score (XGBoost on real borrower outcomes, beats its baseline), the Nudge Engine's Isolation Forest (unaudited), the portfolio return predictor (trained on real prices, 0% influence).
 - **Elevator Pitch:** SmartFin helps users track money behavior, evaluate financial health, plan goals/retirement, and receive actionable recommendations.
@@ -120,6 +121,7 @@ smartfin-copy/
 │   │   ├── api.py                      ← Blueprint at /api/import/credit-report
 │   │   └── migrations.py               ← credit_report_imports, credit_accounts, credit_account_history
 │   ├── unit_test/fixtures/credit_reports/ ← SAMPLE reports (CIBIL-style, Experian-style, protected PDF, txt) + make_fixtures.py
+│   ├── unit_test/                      ← Working suites: test_statement_import, test_credit_report, test_risk_scorer, test_budget_data_management, test_loan_schema, test_deployment, test_postgres, test_file_storage; `api_walkthrough.py` (75 API calls, compared across databases)
 │   ├── retirement_planning/            ← Isolated domain package for retirement workflows
 │   │   ├── api.py                      ← Blueprint at /api/retirement/
 │   │   └── migrations.py              ← Creates retirement DB tables on startup
@@ -159,12 +161,15 @@ smartfin-copy/
 │   │   └── ...                         ← All other existing components UNTOUCHED
 │   └── services/api.js                 ← Axios client — has generic api.get() / api.post()
 ├── infra/README.md                     ← How to create/destroy the AWS deployment, cost, prerequisites
-├── infra/terraform/                    ← versions, variables, network, compute, iam, storage, database, outputs (+ committed provider lock file)
+├── infra/terraform/                    ← versions, variables, network, compute, iam, storage, database, cdn (CloudFront), outputs (+ committed provider lock file). `terraform.tfvars` and `terraform.tfstate` are git-ignored; the state holds secrets
+├── infra/k8s/                          ← kustomize: `base/` (backend, frontend, namespace), `overlays/local` (in-cluster PostgreSQL, local images), `overlays/aws` (ECR images, pull secret)
+├── infra/ansible/                      ← `site.yml` (server setup + deploy), `templates/aws-kustomization.yaml.j2`, `from_terraform.sh` (writes git-ignored inventory.ini + vars.yml)
+├── .github/workflows/                  ← `ci.yml` (tests on SQLite + PostgreSQL, builds, infra checks; never run yet), `deploy.yml` (frontend → GitHub Pages), `auth-ci.yml` (dead: watches a path that doesn't exist)
 ├── docker-compose.yml                  ← backend + frontend containers for local runs (port 8088, named volume for data)
 ├── backend/Dockerfile, .dockerignore   ← python:3.14-slim; stages base → test (pytest in-image) → runtime (non-root, /data volume, waitress)
 ├── frontend/Dockerfile                 ← node build → nginx; nginx.conf.template forwards API paths to ${BACKEND_URL}
 ├── STANDALONE_APP_IDEAS.md             ← Saved ideas for separate apps (EMI decoder, scam checker, …)
-├── .gitattributes                      ← Marks pdf/xlsx/xls/pkl/images binary (autocrlf=true would corrupt them)
+├── .gitattributes                      ← Marks pdf/xlsx/xls/pkl/images binary; keeps LF for `*.sh` and the nginx config (autocrlf=true would break them)
 ├── AGENTS.md                           ← ← THIS FILE — update after every change
 └── docs/                               ← ← DELETED — all context consolidated here
 ```
@@ -352,7 +357,7 @@ python -X utf8 portfolio_optimizer/train_model.py --refresh-data   # fetch + tra
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/nudges/scan` | POST | Run anomaly scan for current user |
+| `/api/nudges/` | GET | Run anomaly scan for current user (there is no `POST /scan`) |
 | `/api/nudges/history` | GET | Get past nudge history |
 | `/api/nudges/patterns` | GET | Get weekly spending patterns |
 
@@ -372,7 +377,7 @@ Seeds 16 weeks of realistic expense data with anomalous spikes at weeks 3 and 10
 
 ---
 
-## 6. Full Database Schema (SQLite `backend/auth.db`)
+## 6. Full Database Schema (SQLite `backend/auth.db` locally; the same 21 tables on PostgreSQL when deployed)
 
 > Financial health scores are NOT stored — calculated on-the-fly per request.
 
@@ -452,6 +457,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - `POST /api/predict/from-budget` — predict from budget module data
 - `POST /api/whatif` — compare two scenarios, returns score delta
 - `GET /api/model-info` — model metadata
+- `GET /healthz` — liveness/readiness probe (process up and database reachable); used by Docker, Kubernetes and Ansible
 - `GET /api/risk-profile`, `PUT /api/risk-profile` — saved credit-card limit/balance for the risk model (JWT)
 
 ### Auth & Account
@@ -512,7 +518,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 - `DELETE /<batch_id>` — undo: removes the accounts that import added, with their loans and payments; restores the previous saved card details
 
 ### Nudge Engine (prefix: `/api/nudges`)
-- `POST /scan`, `GET /history`, `GET /patterns`
+- `GET /` (scan), `GET /history`, `GET /patterns`
 
 ### Chat
 - `POST /api/chat`, `POST /api/chat/clear`, `GET /api/chat/sessions`
@@ -562,7 +568,7 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
 ## 10. Chat Agent — Module Details
 
 **File:** `backend/chat_agent.py`  
-**Integration:** AWS Bedrock (Nova model)  
+**Integration:** AWS Bedrock (Nova model). **Not working anywhere right now:** the local key is rejected by AWS (403), and the live deployment has no Bedrock key set (its IAM role allows Bedrock, but the code authenticates with `AWS_BEARER_TOKEN_BEDROCK`; untested).  
 **Tool-calling:** The chat agent can call internal backend tools to fetch real user data:
 - User profile, budget summary, loan list, goals, SIP/lumpsum projections
 **Frontend:** `ChatAgent.jsx` supports dynamic tool widgets inline (score cards, what-if panels, retirement summaries, loan/goal widgets)
@@ -607,7 +613,28 @@ chat_sessions (session_id PK, user_id FK, conversation_json, title, created_at, 
   - Rules: parse in memory, never store files or passwords; always preview before saving; no claimed ML accuracy — categorization is rules + learned user corrections; train a classifier only once real corrections exist.
 - [ ] **DEPLOYMENT to AWS (started 2026-10-04, see §17).** Phases 1–2 done (app configurable, containerized, verified locally). Next: Terraform → Ansible (k3s) → Kubernetes manifests → CI/CD → operations. **Nothing has been created on AWS; applying Terraform costs money and needs the user's go-ahead.**
 - [ ] **Deferred by user (2026-10-02, "I'll come back to this"):** the Portfolio Optimizer's XGBoost return predictor has R² −0.47 and 0% influence, so it currently adds nothing. Plan: (1) replace it with a next-month **volatility** predictor (volatility clustering is genuinely predictable; it feeds the covariance, so ML would actually move allocations); (2) add a **walk-forward backtest** (rebuild yearly on past-only data; compare return/vol/max drawdown vs all-Nifty and 60/40), run with and without the vol model.
-- [ ] **NEXT:** audit the Nudge Engine the way the Portfolio Optimizer was audited — does it run on real user data or demo-seeded spikes, does the Isolation Forest result hold up, is anything fabricated or silently broken?
+
+### Open items as of 2026-10-04 (most urgent first)
+
+> **Session ended 2026-10-04 with these on hold at the user's request ("wait on it, we'll do it in next session"):** setting up Twilio on the live site, pushing to GitHub, and committing the last AGENTS.md update (the working tree has that one uncommitted change). Start the next session by asking about these three. The AWS deployment is still running and billing.
+
+Deployment
+- [ ] **Push to GitHub.** `main` is about 40 commits ahead of `origin`; the work exists only on the user's laptop. Pushing also triggers `deploy.yml` (frontend → GitHub Pages) and the new CI for the first time. The user has been asked twice and has not answered yet.
+- [ ] **Twilio on the live site.** `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_VERIFY_SERVICE_SID` are in the local `backend/.env` but not on AWS, so OTP send/verify, OTP registration and OTP password reset answer "not configured" there. Proposed (awaiting the user's go-ahead): copy the three values to SSM Parameter Store as SecureStrings, add them to the Kubernetes Secret in `site.yml`, rerun the playbook. Caution given: OTP texts are billed per message and the site is public.
+- [ ] Bedrock on the live site (chat assistant, AI guidance). Found 2026-10-04: the pod reaches Bedrock as `assumed-role/smartfin-node`, but `amazon.nova-pro-v1:0` is not offered on demand in ap-south-1 (use the inference profile `apac.amazon.nova-pro-v1:0`) and the account's daily-token quota for Nova is **0** in ap-south-1 and us-east-1, so every call is throttled. User chose to request a small quota increase (Service Quotas -> Amazon Bedrock -> 'Model invocation max tokens per day for Amazon Nova Pro', ap-south-1). Done locally, **not deployed, not committed**: `chat_agent.get_bedrock_client` now falls back to the IAM role when `AWS_BEARER_TOKEN_BEDROCK` is unset; the AWS overlay and Ansible template set `BEDROCK_MODEL_ID=apac.amazon.nova-pro-v1:0` and `SMARTFIN_AI_GUIDANCE_ENABLED=true`. Deploy only after the quota is approved (otherwise every score request waits on a throttled Bedrock call before falling back to the rules). The user must also rotate the old key, which sat in log files that have since been deleted.
+- [ ] Automatic deploys from GitHub: code written 2026-10-05 (§16 top row). Done 2026-10-05: `terraform apply` (4 added, no drift), playbook run (26 ok, tag still `46654cc`, AI guidance off), and the SSM document tested with the admin profile (no-op rollout succeeded; a malformed tag is refused). **Waiting on the user:** add GitHub repository variables `AWS_DEPLOY_ROLE_ARN` = `arn:aws:iam::864046983878:role/smartfin-github-deploy` and `AWS_INSTANCE_ID` = `i-0e01901d77e906d74`, then say when to commit and push. The GitHub role itself is untested until the first workflow run.
+- [ ] Monitoring: no log collection or alarms.
+- [ ] Database restore test (RDS keeps 7 days of backups; a restore has never been tried).
+- [ ] Connection pool (`psycopg_pool`): each request opens its own PostgreSQL connection.
+- [ ] nginx security headers: `add_header` at `server` level is lost in `location /`; CloudFront adds them for now. Fix in `frontend/nginx.conf.template` at the next image build.
+- [ ] Encrypt CloudFront → server (needs a domain name).
+- [ ] Memory on the `t3.small` node is tight (about 1.3 of 1.9 GB).
+- [ ] Reminder to give the user: `smartfin-deploy_accessKeys.csv` sits in the project folder (git-ignored); move it somewhere private. `terraform destroy` when not demonstrating.
+
+App
+- [ ] The user's real CIBIL report is an image-only PDF and cannot be imported: get a text PDF from the bureau site, or build OCR (user said "forget about it right now").
+- [ ] **Audit the Nudge Engine** the way the Portfolio Optimizer was audited — real user data or demo-seeded spikes, does the Isolation Forest result hold up, is anything fabricated or silently broken? Note its docs list `expenses`/`budget_categories` with columns the real tables don't have.
+- [ ] 8 older test files in `backend/unit_test/` fail at collection (§14 #17).
 - [ ] Replace `MainDashboard.jsx` health score widget with Portfolio Summary card (optional)
 - [ ] Run `demo_seeder.py` for a real user account to populate Nudge Engine data
 - [ ] End-to-end test: login → /portfolio → set amount + risk → verify donut chart renders
@@ -630,6 +657,9 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 ### Financial Health Score Story
 > "The health score is a gradient-boosted model trained on 150,000 real borrowers, labelled by whether they actually fell 90 days behind on a payment in the following two years. I picked only inputs my app can supply and whose meaning carries over: age, debt-to-income, late and missed payments, and optional credit-card utilization. In 5-fold cross-validation it reaches AUC 0.858 against 0.836 for logistic regression, and its probabilities are calibrated: when it says 4%, about 4% defaulted. Three design choices matter. I dropped the 'number of credit lines' column because in US data having none signals risk, which would tell a student with no loans to borrow. I added monotone constraints so a what-if can never reward paying late. And the 0-100 score ranks you against borrowers your own age, because the training population is much older than my users. The limits are stated in the UI: it's US data from 2011, and without payment history or card data the model is weak (AUC 0.66). The earlier version of this module trained a model to copy a formula I wrote myself and reported R² 96%, which measured nothing. Replacing it is the part of the project I'd point to."
 
+### Deployment Story
+> "The app runs on AWS in Mumbai. Terraform creates everything: a VPC with public and private subnets, one EC2 server, a PostgreSQL database on RDS in the private subnets, ECR for images, S3 for profile pictures, an IAM role, and CloudFront for HTTPS. Ansible turns the bare server into a single-node Kubernetes cluster with k3s, copies the secrets from Parameter Store into the cluster, and rolls the app out. Kubernetes runs two copies each of the backend and the frontend, replaces them one at a time on a deploy, and restarts them if the health check fails. I chose k3s on one server rather than EKS because the managed control plane alone would triple the bill, and I say openly that the app doesn't need Kubernetes at this size: I used it to learn it. To get there the app had to change: the SQLite file became PostgreSQL through a small adapter so the same SQL runs on both, uploads moved to S3, and configuration moved to environment variables. The parts I'd point to are the checks: the same 75 API calls give identical answers on both databases, a rolling restart dropped zero of 362 requests, and a test caught that my first adapter was committing every statement immediately."
+
 ### Portfolio Optimizer Story
 > "The core is Markowitz mean-variance optimization (SLSQP) over 9 Indian asset classes built from real data: NIFTY 50 / Midcap 50 / Smallcap 250 indices, a Nasdaq-100 ETF, a liquid fund's NAV, Gold ETF, COMEX silver in rupees, and a REIT. That's 7 to 23 years each, with Fixed Deposit as the one labeled assumption. Three estimation choices make it robust. First, sample means from short or lucky periods are shrunk toward a risk-based prior, so Silver's 2020s rally or Nasdaq's AI run don't dominate. Second, covariance comes from weekly returns for ~4× more data, weekly rather than daily because silver trades on US hours. Third, there's a 35% per-asset cap. XGBoost predicts next-month returns per asset, and its influence is weighted by its out-of-sample R². Every model scores below zero, so it currently has zero say. That's the Efficient Market Hypothesis showing up honestly on real prices. Along the way we found data problems you only catch by checking: unadjusted stock splits, a liquid ETF whose price ignores its own yield, and a NAV rescaled 100×."
 
@@ -649,6 +679,11 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 | Where does the risk model get payment history? | From a credit bureau report the user uploads: each account's month-by-month days past due. The parser finds fields by label rather than by position, so one parser reads different bureaus' layouts; open loans become loans with a payment per month, cards give the utilization, and re-uploading a newer report updates accounts instead of duplicating them. I only had sample reports to build against, and I say so |
 | How does what-if work? | Backend predicts both current and modified scenarios, returns score delta and impact label |
 | How is explainability addressed? | Return classification labels, financial ratios, warnings, and guidance alongside prediction |
+| Why PostgreSQL, and why SQL not NoSQL? | The data is relational and financial: budgets, expenses, loans, payments and credit accounts are joined constantly; an import must be all-or-nothing; constraints (positive amounts, unique transaction hashes) do real work. PostgreSQL gives joins, transactions and constraints, plus JSON columns for the few free-form fields. NoSQL would mean rewriting every query for no gain at this scale |
+| How did you migrate from SQLite? | One adapter module is the only place a database is opened. On PostgreSQL it accepts the same `?` placeholders, returns rows the same way, raises the same error classes, and wraps each statement in a savepoint so a failed statement doesn't abort the transaction. Only eight SQLite-only statements were rewritten. A script runs 75 API calls on both databases and the transcripts must match exactly |
+| Why Kubernetes for a small app? | It isn't needed at this size and I say so. I used k3s on one server to learn rolling updates, health probes, secrets and ingress at a cost of about $40 a month; EKS would have been three to four times that |
+| What does each tool do? | Docker packages the app; Terraform creates the AWS resources; Ansible configures the server and deploys; Kubernetes runs and heals the app; GitHub Actions tests it |
+| How are secrets handled in the deployment? | Terraform generates the database password and the token-signing key and stores them encrypted in Parameter Store. The server reads them with its IAM role and creates a Kubernetes Secret. They are never in the repository or in an image; the only plain copy is the git-ignored Terraform state |
 | Is this just ML demo? | No — complete user journey: auth, profile, budget, loans, goals, retirement planner, AI chat assistant |
 
 ---
@@ -671,7 +706,7 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 14. **Binary files and git:** `core.autocrlf=true`. `.gitattributes` marks pdf/xlsx/xls/pkl/images as binary. Add new binary extensions there, or git will CRLF-convert and corrupt them on checkout.
 15. **Statement import is validated on SAMPLE files plus one real-shaped export** (`unit_test/fixtures/statements/` are generated samples; on 2026-10-03 the user's `bankstatements.csv`, a 509-row pre-processed export with `date,DrCr,amount,balance,mode,name` columns, failed and was fixed — §15 #50–#54). It is still not a raw bank download. Before trusting a new bank's format, test with a real redacted statement. The parser raises a clear error if it can't find the transaction table rather than guessing. The strongest check on a real file: every row's balance must equal the previous balance ± the amount. The user's file is not committed (real names); tests use a small synthetic CSV in the same layout.
 16. **The 422 on `/api/import/statement/preview` is intentional** (password-protected PDF). The browser logs it as a console error; it isn't a JS error.
-17. **Pre-existing: 8 test files in `backend/unit_test/` fail at collection** (e.g. `test_profile_service.py`, `test_retirement_repositories.py`, `test_risk_assessment_service.py`), so a bare `pytest unit_test` aborts. Not investigated yet. Run `pytest unit_test/test_statement_import.py unit_test/test_loan_schema.py` (65 pass).
+17. **Pre-existing: 8 test files in `backend/unit_test/` fail at collection** (e.g. `test_profile_service.py`, `test_retirement_repositories.py`, `test_risk_assessment_service.py`), so a bare `pytest unit_test` aborts. Not investigated yet. Run the eight working files instead (the list is in `backend/Dockerfile` and `.github/workflows/ci.yml`): 167 pass + 4 skipped without PostgreSQL, **171 pass** with `TEST_DATABASE_URL` set.
 18. **Recurring detection can return two streams for one merchant** (amount clusters), so never key on merchant alone (`RecurringPayments.jsx` keys on merchant + direction + typical amount; `detect_monthly_income` matches merchant + amount range).
 19. **Risk-model training data is not in the repo** (`backend/risk_scorer/data/` is git-ignored; 150k rows from OpenML). The trained model and its metadata are committed, so the app runs without it. Training needs internet once.
 20. **Health score inputs:** only EMI, rent, income, age, late/missed payments and card utilization move the score. Food, shopping, travel and savings don't (they still feed the rule-based spending charts and advice). The What-If Simulator therefore changes EMI and rent.
@@ -798,7 +833,7 @@ The project's unique asset is that one app holds a user's **real** spending, loa
 
 Result on the file: salary ~₹52k/month, a ₹26,286 monthly debit to `HDFCBANK`, an ₹11,500 monthly credit; income filled for 21 months; re-upload 509/509 duplicates; undo clean. Limit that rules can't fix: ~99% of the money out is person-to-person UPI, cheques and ATM cash with 8-character names, so it stays "other" until the user categorizes it in the preview (corrections are learned per merchant).
 
-### Session 2026-10-03 (cont.) — health score replaced with a real-outcome risk model (`main`, uncommitted)
+### Session 2026-10-03 (cont.) — health score replaced with a real-outcome risk model (`main`, commit `313504b`)
 
 | # | Problem | Root cause | Fix | How it was caught |
 |---|---|---|---|---|
@@ -809,7 +844,7 @@ Result on the file: salary ~₹52k/month, a ₹26,286 monthly debit to `HDFCBANK
 | 59 | A user with no age scored 85 | The training data has no missing ages, so the tree's default branch for a missing age is arbitrary | Age is never passed as missing: request → profile → 30 | Same profile check ("nothing known" came out best) |
 | 60 | What-If Simulator would always show "no change" | Its two inputs were shopping and savings, which the new model doesn't use | Simulator now changes EMI and rent | Read the component after the model's inputs were fixed |
 
-### Session 2026-10-03 (cont.) — stale server, deleting budget history (`main`, uncommitted)
+### Session 2026-10-03 (cont.) — stale server, deleting budget history (`main`, commit `3a204b3`)
 
 | # | Problem | Root cause | Fix | How it was caught |
 |---|---|---|---|---|
@@ -820,13 +855,13 @@ Result on the file: salary ~₹52k/month, a ₹26,286 monthly debit to `HDFCBANK
 
 Privacy answer given to the user (2026-10-03): statement files and PDF passwords are not stored; transactions are stored unencrypted in `backend/auth.db`; `auth.db`, `.env`, `*.log` are git-ignored; the import makes no network calls; the chat agent and advice panels would send expense data to AWS Bedrock if the key worked; the backend binds `0.0.0.0`. Offered and not yet done: bind to `127.0.0.1`, git-ignore statement files, lower the log level.
 
-### Session 2026-10-04 — debug logging leaked statement contents (`main`, uncommitted)
+### Session 2026-10-04 — debug logging leaked statement contents (`main`, in commit `313504b`)
 
 | # | Problem | Root cause | Fix | How it was caught |
 |---|---|---|---|---|
 | 65 | Importing a real PDF statement flooded the console and `backend.log` with thousands of `pdfminer ... DEBUG` lines, including the transactions themselves, and was slow | Root logger at DEBUG with a file handler; third-party libraries inherit it | Default INFO via `LOG_LEVEL`; data/secret-handling libraries pinned to WARNING in `NOISY_LOGGERS`. Sample PDF preview: 0 pdfminer lines, 0 `Bearer` occurrences, 0.24 s | User pasted the log output |
 
-### Session 2026-10-04 (cont.) — finishing the risk model (`main`, uncommitted)
+### Session 2026-10-04 (cont.) — finishing the risk model (`main`, commits `313504b`, `6153795`)
 
 | # | Problem | Root cause | Fix | How it was caught |
 |---|---|---|---|---|
@@ -835,7 +870,7 @@ Privacy answer given to the user (2026-10-03): statement files and PDF passwords
 | 68 | **Dashboard form was wiped after every "Analyze"**, so a second analysis never submitted (required fields empty, browser validation blocked it silently) | `ProtectedRoute` was a component defined inside `AppContent`; each `loading`/`result` state change produced a new component type and React remounted the page. Pre-existing, on all 13 protected routes | Call it as a plain function. Added `key={result.timestamp}` to `WhatIfSimulator`, whose stale state the remount had been hiding | Playwright: step 3 of the state check produced no `POST /api/predict` at all; request logging showed two posts for three clicks |
 | 69 | Retirement readiness used the old 8-factor rule formula for 20% of its score | `integration_manager` called `FinancialHealthScorer` | Uses `assess_user`; old scorer, its test, the pickle, training script and dataset deleted | Planned follow-up |
 
-### Session 2026-10-04 (cont.) — credit report import, roadmap Phase 3 (`main`, uncommitted)
+### Session 2026-10-04 (cont.) — credit report import, roadmap Phase 3 (`main`, commit `67c7e47`)
 
 | # | Problem | Root cause | Fix | How it was caught |
 |---|---|---|---|---|
@@ -846,7 +881,7 @@ Privacy answer given to the user (2026-10-03): statement files and PDF passwords
 
 Also this session: 5 commits on `main` (statement-import fixes, risk model, budget data management, remount fix, docs); deleted `backend/backend.log` and a 167 MB `backend.log` at the repo root that held the Bedrock key and a full pdfminer trace of the user's statement. **The user still has to rotate the Bedrock key.**
 
-### Session 2026-10-04 (cont.) — deployment, phases 1–2 (`main`, uncommitted)
+### Session 2026-10-04 (cont.) — deployment, phases 1–2 (`main`, commit `ab8ebae`)
 
 | # | Problem | Root cause | Fix | How it was caught |
 |---|---|---|---|---|
@@ -856,7 +891,7 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 | 77 | Three components called `http://127.0.0.1:5000` directly | Bypassed `API_BASE_URL` | Export `API_BASE_URL` from `api.js` and use it; `??` instead of `||` so an empty value means "same address" | grep for hardcoded hosts |
 | 78 | Port 8080 on this machine is taken by another program on `[::1]` | — | Compose publishes 8088; test with `127.0.0.1`, not `localhost` | `netstat` before starting the stack |
 
-### Session 2026-10-04 (cont.) — PostgreSQL migration (`main`, uncommitted)
+### Session 2026-10-04 (cont.) — PostgreSQL migration (`main`, commit `ed8bad0`)
 
 | # | Problem | Root cause | Fix | How it was caught |
 |---|---|---|---|---|
@@ -872,6 +907,7 @@ Also this session: 5 commits on `main` (statement-import fixes, risk model, budg
 | 83 | `terraform plan` impossible | The machine's only AWS credentials were another project's IAM user without EC2/RDS/SSM rights | The user created IAM user `smartfin-deploy` and the CLI profile `smartfin`; Terraform uses it via `aws_profile`. Not worked around | First read-only AWS calls were denied |
 | 84 | Playbook failed at the first conditional: `module 'ast' has no attribute 'Str'` | WSL has ansible-core 2.15 on Python 3.14; `ast.Str` was removed from Python | ansible-core 2.21 in a venv (`~/.venvs/smartfin-ansible`; `python3 -m venv` needed `--without-pip` + `get-pip.py` because `python3-venv` isn't installed and sudo needs a password) | First real run; `--syntax-check` had passed |
 | 86 | Security headers set in nginx were missing on pages | In nginx an `add_header` inside a `location` replaces the ones set at `server` level, and `location /` has its own | CloudFront's managed security-headers policy now adds them (HSTS, nosniff, frame options, referrer policy); the nginx config still has the gap for anyone reaching it directly | Looked at the live response headers |
+| 87 | OTP features answer 'not configured' on the live site | The deployment passes only `DATABASE_URL` and `JWT_SECRET_KEY` as secrets; the three `TWILIO_*` values (and the Bedrock key) from the local `.env` were never carried to AWS | Open: proposed SSM parameters + playbook change, waiting for the user's go-ahead | User asked 'is twilio not configured on deployed app'; confirmed by listing which variables are set inside a running backend pod (names only) |
 | 85 | A missing profile picture returned 500 on AWS (404 locally) | Without `s3:ListBucket`, S3 answers AccessDenied instead of NoSuchKey for a missing object | Added `s3:ListBucket` on the bucket, limited to the `profile_pictures/` prefix | Live S3 check after the first deploy; the stand-in S3 client in the tests could not show it |
 
 ---
@@ -952,7 +988,8 @@ Not done / known limits:
 | `SMARTFIN_CORS_ORIGINS` | Extra allowed origins, comma-separated. Not needed when site and API share an address |
 | `SMARTFIN_LOG_FILE` | Log file path; empty = stdout only (containers). Default `backend.log` |
 | `SMARTFIN_LOG_LEVEL` | Default `INFO` |
-| `AWS_REGION`, `AWS_BEARER_TOKEN_BEDROCK`, `BEDROCK_MODEL_ID`, `SMARTFIN_AI_GUIDANCE_ENABLED`, `TWILIO_*` | Optional integrations |
+| `AWS_REGION`, `AWS_BEARER_TOKEN_BEDROCK`, `BEDROCK_MODEL_ID`, `SMARTFIN_AI_GUIDANCE_ENABLED` | Optional: chat assistant and AI guidance. Not set on the live site |
+| `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` | Optional: OTP by SMS. Set in the local `.env`; **not set on the live site** (§12) |
 
 Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BASE` (`/` in the container). Frontend run-time: `BACKEND_URL` (nginx upstream).
 
@@ -968,6 +1005,46 @@ Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BA
 
 **Still to do:** CD from GitHub (OIDC role + SSM Run Command), logs/alarms, a database restore test, a connection pool, pushing `main` to GitHub.
 
+### Action log, 2026-10-03 and 2026-10-04 (in order)
+
+Each line is one action; the commit that holds it is in brackets. Problems hit along the way are in §15 with the same dates.
+
+Statement import and the risk model
+1. Restored a truncated line in §12 of this file from git history. [`05948c2`]
+2. User's `bankstatements.csv` failed to import: fixed the parser (`DrCr` header, `mode` + `name` columns), prefix keyword matching, amount-cluster and calendar-month recurring detection; 10 tests. [`05948c2`]
+3. Brainstormed "genuine ML"; user chose to replace the health scorer.
+4. Downloaded Give Me Some Credit from OpenML, explored it, compared 7 feature sets × 3 models, built `risk_scorer/` (features, training, model, service), trained and saved the model. [`313504b`]
+5. Wired the model into `/api/predict`, `/api/whatif`, `/api/model-info` and the chat tools; added risk drivers, optional inputs and the EMI/rent what-if to the frontend; verified through the app and a browser. [`313504b`]
+6. Killed a stale second backend on port 5000 that was still serving the old model.
+7. Answered whether importing a real statement is safe (what is stored, what is not).
+8. Built "Manage data" on the Budget page: past imports with undo, delete a month, delete everything; tested in a browser against a database copy. [`3a204b3`]
+9. Fixed debug logging that wrote statement contents and the Bedrock key to `backend.log`. [`313504b`]
+10. Removed the "Run Analyzer from This Month" button at the user's request. [`3a204b3`]
+11. Finished the risk model: confidence levels, saved card details, `assess_user`, retirement planner switched over, old scorer files deleted. [`313504b`]
+12. Fixed the `ProtectedRoute` remount bug that wiped the dashboard form. [`6153795`]
+13. Committed everything so far in five commits; deleted `backend/backend.log` and a 167 MB `backend.log` at the repo root.
+14. Built the credit report import (parser, service, API, dialog on the Loans page); 44 tests; browser-verified on a database copy. [`67c7e47`]
+15. User's real CIBIL PDF failed: built `describe_layout.py` (redacted layout dump); it showed an image-only PDF; added a specific error. User: "forget about it right now". [`67c7e47`]
+
+Deployment
+16. Planned the AWS deployment; user chose Kubernetes; later PostgreSQL on RDS, region ap-south-1, and SQL over NoSQL.
+17. Phase 1: `SMARTFIN_DATA_DIR`, production JWT-secret check, `/healthz`, CORS and log-file settings, one API address in the frontend, pinned requirements. [`ab8ebae`]
+18. Phase 2: backend and frontend Dockerfiles, nginx routing, `docker-compose.yml`, `test_deployment.py`; 147 tests passed inside the image; stack verified on port 8088. [`ab8ebae`]
+19. Phase 3: measured the migration, wrote `dbapi.py`, routed 23 connect sites through it, rewrote 8 statements, wrote `api_walkthrough.py` and `test_postgres.py`; found and fixed the immediate-commit bug; added PostgreSQL to compose. [`ed8bad0`]
+20. Phase 4: `file_storage.py` (S3 or folder), 16 MB request limit with a 5 MB picture cap; 12 tests. [`184430c`]
+21. Phase 5: wrote the Terraform (network, compute, IAM, storage, database, outputs) and `infra/README.md`; `fmt` and `validate` passed; found the machine's AWS credentials belonged to another project and stopped there. [`184430c`]
+22. Phase 7: wrote the kustomize manifests; ran k3s in a Docker container, loaded the images, deployed the local overlay, passed the end-to-end check, proved a rolling restart drops no requests; added `dbapi.startup_lock()` after proving the start-up race. [`ae6c1fb`]
+23. Phase 6: wrote the Ansible playbook, template and `from_terraform.sh`; syntax-checked in WSL. [`ae6c1fb`, `b653306`, `525f69d`]
+24. Created the SSH key `~/.ssh/smartfin` and `terraform.tfvars`; wrote `.github/workflows/ci.yml`. [`46654cc`]
+25. User created IAM user `smartfin-deploy` and the `smartfin` profile; ran `terraform plan` (41 to add) and showed it; user approved; `terraform apply` created 41 resources; second plan showed no drift.
+26. Built both images, pushed them to ECR as `46654cc`.
+27. Copied the SSH key into WSL, generated the inventory, ran the playbook: failed on the Ansible/Python mismatch; installed ansible-core 2.21 in a venv; reran: 25 tasks ok.
+28. Checked the live site from outside (full check, S3 pictures, closed ports); added `s3:ListBucket` with a second apply to fix the missing-picture 500; removed the check account from the live database. [`d27b0a3`]
+29. HTTPS: wrote `cdn.tf`, restricted port 80 to CloudFront, removed the 443 rule, added the security-headers policy; two applies; re-verified over HTTPS; removed the check account again. [`bf47e79`]
+30. Answered "is everything done" with the open list now in §12; confirmed Twilio and Bedrock are not configured on the live site.
+
+Things changed on the user's machine outside the repository: `~/.ssh/smartfin` (+ `.pub`, and a copy inside WSL); `~/.venvs/smartfin-ansible` in WSL; `psycopg[binary]` installed for Python 3.14; Docker images `smartfin-copy-backend`, `smartfin-copy-frontend`, `smartfin-backend-test`, `smartfin-backend:46654cc`, `smartfin-frontend:46654cc`; a stopped container `smartfin-pg` (test PostgreSQL, port 55432) and Docker volumes `smartfin-copy_smartfin-data` / `smartfin-copy_smartfin-pgdata` holding only a test account.
+
 **Rules**
 - The local `backend/auth.db` holds the user's real bank statement. It must never enter an image, the repo or AWS; deployments start with an empty database. `backend/.dockerignore` enforces this for images: keep it that way.
 - More than one backend replica needs PostgreSQL (done) **and** uploads on S3 (phase 4, not done): until then keep one replica.
@@ -979,6 +1056,9 @@ Frontend build-time: `VITE_API_BASE_URL` (empty string = same address), `VITE_BA
 
 | Date | Agent/Tool | Change |
 |---|---|---|
+| 2026-10-05 | Claude Code (Opus 5.5) | **Automatic deploys from GitHub written, not yet live.** `infra/terraform/cicd.tf` (GitHub OIDC provider, role `smartfin-github-deploy` limited to `main` of `Saumye0106/SmartFin`, ECR push to the two repositories, `ssm:SendCommand` only for the document `smartfin-deploy` on the node), `infra/ansible/files/smartfin-deploy.sh` (installed as `/usr/local/bin/smartfin-deploy`: sets the image tag, applies, waits for the rollout and `/healthz`, restores the previous tag on failure), `.github/workflows/deploy-aws.yml` (push to `main` -> CI via `workflow_call` -> build/push -> SSM). `ci.yml` no longer triggers on push itself; `deploy.yml` (GitHub Pages) is manual-only. `terraform plan`: 4 to add, 0 to change. **Still to do, each needs the user's go-ahead:** `terraform apply`; rerun the playbook (use `-e image_tag=46654cc -e ai_guidance_enabled=false` so nothing else changes while the Bedrock quota is 0); user adds repository variables `AWS_DEPLOY_ROLE_ARN` and `AWS_INSTANCE_ID` on GitHub (`gh` is not installed here); commit and push. The pipeline changes only the image tag: manifest/playbook/Terraform changes stay manual. Steps and off switch in `infra/README.md` |
+| 2026-10-05 | Claude Code (Opus 5.5) | Portfolio Optimizer page restyled to the shared page template (background grid + glows, Sidebar, top nav, hero header, glass cards, SmartFinFooter) with an **amber/orange accent**, chosen because no other page uses it (cyan = dashboard/profile, emerald = budget/goals, purple = loans/retirement, blue = SIP, pink = chat). Emojis replaced by iconify icons; chart colours re-chosen so they do not reuse other pages' accents. Fixed an older bug: donut slices were drawn at wrong positions (dash pattern longer than the circumference). Only `PortfolioOptimizer.jsx` / `.css` changed; no API change. Browser-checked on a throwaway database (all 4 tabs, narrow width, 0 console errors); build passes. Not committed. Also this session (uncommitted, not deployed): Bedrock via the IAM role, see §12 |
+| 2026-10-04 | Claude Code (Opus 5.5) | Documentation pass at the user's request ('update agents.md with all the works thats done yet, logging every action'): §17 gained a numbered action log for 2026-10-03/04 with commit hashes and a list of what changed on the machine outside the repo; §12 replaced by one current open-items list; §1, §3, §5, §6, §7, §10, §13 (deployment story, five viva answers), §14 #17 and the §15 session headers brought up to date; Twilio/Bedrock not being configured on the live site recorded as §15 #87. No code changed |
 | 2026-10-04 | Claude Code (Opus 5.5) | HTTPS for the live site through CloudFront's free address (user chose it over a domain): `infra/terraform/cdn.tf`, node port 80 restricted to CloudFront's prefix list, 443 rule removed, security-headers policy. Live at https://d26yos94s5xald.cloudfront.net; full check and the S3 picture round trip pass over HTTPS, HTTP redirects, direct HTTP to the server is blocked, assets are served from the edge cache. §15 #86, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | **SmartFin deployed to AWS** at http://43.205.46.101. `terraform apply` (41 resources, user approved after reviewing the plan), images pushed to ECR as `46654cc`, playbook run (failed once on the Ansible/Python mismatch, then 25 tasks ok). Verified from outside incl. S3 pictures; fixed the missing-picture 500 by adding `s3:ListBucket`. Live database left empty. Costs about $40/month until destroyed. No HTTPS yet. §15 #83–#85, §17 |
 | 2026-10-04 | Claude Code (Opus 5.5) | User said "go ahead" but the `smartfin` AWS profile does not exist yet (only `pixelframe-dev`), so nothing was applied. Did the local preparation instead: SSH key, `terraform.tfvars`, and `.github/workflows/ci.yml` (CI only). `.gitattributes` now keeps LF for `*.sh` and the nginx config. Note: `.github/workflows/auth-ci.yml` watches `services/auth/**`, which doesn't exist; `deploy.yml` still publishes the frontend to GitHub Pages on every push to `main` |

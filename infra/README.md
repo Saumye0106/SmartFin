@@ -101,6 +101,31 @@ This has been run for real: first deployed on 2026-10-04 (41 resources, then the
 outside: the site, sign-up and login, the risk score, profile pictures through S3, and that the database and
 the backend port are not reachable from the internet.
 
+## Automatic deploys from GitHub
+
+A push to `main` runs `.github/workflows/deploy-aws.yml`: the CI checks, then both images are built and pushed
+to ECR tagged with the commit, then the server rolls out that tag. If the new version does not come up healthy,
+the server goes back to the previous one and the workflow fails.
+
+```
+GitHub Actions ──identity token──► AWS role smartfin-github-deploy
+      ├─ push images ─────────────► ECR
+      └─ run document smartfin-deploy (SSM) ─► server: /usr/local/bin/smartfin-deploy <commit>
+```
+
+- No AWS key is stored in GitHub. The role can only be used by workflow runs on `main` of the repository named in
+  `github_repository` (`cicd.tf`), and may only push to the two ECR repositories and run that one command.
+  SSH stays closed to GitHub.
+- One-time setup: `terraform apply` (creates the role and the command), run the playbook once (installs the
+  script on the server), then on GitHub under Settings > Secrets and variables > Actions > Variables add
+  `AWS_DEPLOY_ROLE_ARN` (`terraform output github_deploy_role_arn`) and `AWS_INSTANCE_ID`
+  (`terraform output node_instance_id`).
+- Off switch: delete the `AWS_DEPLOY_ROLE_ARN` variable. The checks still run; the deploy is skipped. Do this
+  before `terraform destroy`, and update both variables after recreating the deployment.
+- The pipeline only changes the image tag. Changes under `infra/k8s`, `infra/ansible` or `infra/terraform`
+  still need the playbook or `terraform apply` by hand.
+- To deploy or roll back by hand on the server: `sudo smartfin-deploy <commit>` (the image must be in ECR).
+
 ## Destroy
 
 ```

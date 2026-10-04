@@ -180,6 +180,15 @@
       ansible.builtin.command: /usr/local/bin/smartfin-ecr-login
       changed_when: true
 
+    # ── Deploys from GitHub: the pipeline runs this script through SSM Run Command ──
+    - name: Install the deploy script
+      ansible.builtin.copy:
+        src: files/smartfin-deploy.sh
+        dest: /usr/local/bin/smartfin-deploy
+        owner: root
+        group: root
+        mode: "0755"
+
     # ── Deploy ───────────────────────────────────────────────────────────────
     - name: Copy the Kubernetes manifests
       ansible.builtin.copy:

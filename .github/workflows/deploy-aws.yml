@@ -1,0 +1,112 @@
+name: Deploy to AWS
+
+# On every push to main: run the CI checks, build both images, push them to ECR tagged with the
+# commit, and tell the server to roll out that tag. No AWS key is stored in GitHub: the job
+# exchanges GitHub's identity token for temporary credentials (see infra/terraform/cicd.tf).
+#
+# Needs two repository settings (Settings > Secrets and variables > Actions), saved either as
+# variables or as secrets (neither value is sensitive):
+#   AWS_DEPLOY_ROLE_ARN   terraform output github_deploy_role_arn
+#   AWS_INSTANCE_ID       terraform output node_instance_id
+# While AWS_DEPLOY_ROLE_ARN is not set, the checks still run and the deploy steps are skipped,
+# so deleting it is the off switch (for example after terraform destroy).
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deploys run one after another, never two at once, and a running deploy is never cancelled.
+concurrency:
+  group: deploy-aws
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Checks
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Build, push and roll out
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # lets the job ask GitHub for the identity token AWS checks
+
+    env:
+      AWS_REGION: ap-south-1
+      ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN || secrets.AWS_DEPLOY_ROLE_ARN }}
+      INSTANCE_ID: ${{ vars.AWS_INSTANCE_ID || secrets.AWS_INSTANCE_ID }}
+
+    steps:
+      - name: Deploys are switched off
+        if: env.ROLE_ARN == ''
+        run: echo "::notice::AWS_DEPLOY_ROLE_ARN is not set, so nothing was deployed."
+
+      - uses: actions/checkout@v4
+
+      - name: Get temporary AWS credentials
+        if: env.ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: env.ROLE_ARN != ''
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push the images
+        if: env.ROLE_ARN != ''
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          TAG="${GITHUB_SHA::7}"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+          # Tags in ECR cannot be overwritten, so a re-run of the same commit skips the push.
+          push() {  # push <repository> <docker build arguments...>
+            local repo="$1"; shift
+            if aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$TAG" > /dev/null 2>&1; then
+              echo "$repo:$TAG is already in ECR"
+              return
+            fi
+            docker build -t "$REGISTRY/$repo:$TAG" "$@"
+            docker push "$REGISTRY/$repo:$TAG"
+          }
+
+          push smartfin-backend --target runtime backend
+          push smartfin-frontend frontend
+
+      - name: Roll out on the server
+        if: env.ROLE_ARN != ''
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name smartfin-deploy \
+            --instance-ids "$INSTANCE_ID" \
+            --parameters "ImageTag=$TAG" \
+            --comment "GitHub run $GITHUB_RUN_ID" \
+            --query Command.CommandId --output text)
+          echo "SSM command $COMMAND_ID"
+
+          # The server replaces the copies one at a time and checks the site; allow 15 minutes.
+          STATUS=Pending
+          for _ in $(seq 1 90); do
+            sleep 10
+            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2> /dev/null || echo Pending)
+            case "$STATUS" in Pending|InProgress|Delayed) ;; *) break ;; esac
+          done
+
+          echo "----- output from the server -----"
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+            --query '[StandardOutputContent, StandardErrorContent]' --output text || true
+          echo "----- status: $STATUS -----"
+          [ "$STATUS" = "Success" ]

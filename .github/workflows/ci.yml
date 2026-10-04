@@ -1,12 +1,12 @@
 name: CI
 
 # Tests the backend on SQLite and on PostgreSQL, builds the frontend, and builds both
-# container images. It does not deploy anything.
+# container images. It does not deploy anything itself: on a push to main it is run by
+# deploy-aws.yml, which deploys only if these checks pass.
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
